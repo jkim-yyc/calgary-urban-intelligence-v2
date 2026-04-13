@@ -3,7 +3,8 @@ name: Nexus_Main_Pipeline
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *' # Daily update at midnight
+    # Runs Daily at Midnight UTC
+    - cron: '0 0 * * *'
 
 jobs:
   run_nexus:
@@ -11,24 +12,24 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
       
-      - name: Initialize Python
+      - name: Initialize Python Environment
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           
-      - name: Install Tools
+      - name: Install Dependencies
         run: pip install pandas requests
         
-      - name: Run Script
+      - name: Execute Strategy Engine
         run: python script/main.py
         
-      - name: Commit Data
+      - name: Commit Intelligence Update
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "actions@github.com"
           git add data/*
-          git commit -m "Automated Pulse Sync: $(date +'%Y-%m-%d')" || exit 0
+          git commit -m "Automated Strategic Pulse: $(date +'%Y-%m-%d')" || exit 0
           git push
