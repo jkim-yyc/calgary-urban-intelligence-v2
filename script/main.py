@@ -43,43 +43,51 @@ def get_industry_sector(lt):
 
 def run_pipeline():
     url = "https://data.calgary.ca/resource/6h66-y7v6.json"
-    try:
-        print("Fetching data...")
-        r = requests.get(url, params={"$limit": 50000})
-        df = pd.DataFrame(r.json())
-        
-        # Clean columns
-        df.columns = [c.replace('_', '').lower() for c in df.columns]
-        
-        # Find community column
-        comm_col = next((c for c in df.columns if 'comm' in c), None)
-        status_col = 'licencestatus' if 'licencestatus' in df.columns else df.columns[2]
-        type_col = 'licencetypes' if 'licencetypes' in df.columns else None
+    r = requests.get(url, params={"$limit": 50000})
+    df = pd.DataFrame(r.json())
+    
+    # Atomic normalization
+    df.columns = [c.replace('_', '').lower() for c in df.columns]
+    
+    comm_col = next((c for c in df.columns if 'comm' in c), None)
+    status_col = 'licencestatus' if 'licencestatus' in df.columns else df.columns[2]
+    type_col = 'licencetypes' if 'licencetypes' in df.columns else 'licencetid'
 
-        if not comm_col or not type_col:
-            print("Missing core columns.")
-            return
+    # Mapping atomic records to strategic sectors
+    df['industry_sector'] = df[type_col].apply(get_industry_sector)
 
-        print(f"Mapping and aggregating...")
-        df['industry_sector'] = df[type_col].apply(get_industry_sector)
+    # Split-Apply-Combine Aggregation
+    nexus = df.groupby([comm_col, 'industry_sector']).agg(
+        active_licenses=(status_col, lambda x: (x == 'Issued').sum()),
+        churn_events=(status_col, lambda x: x.isin(['Cancelled', 'Expired']).sum()),
+        total_volume=(status_col, 'count')
+    ).reset_index()
 
-        # Aggregation Logic
-        nexus = df.groupby([comm_col, 'industry_sector']).agg(
-            active_licenses=(status_col, lambda x: (x == 'Issued').sum()),
-            churn_events=(status_col, lambda x: x.isin(['Cancelled', 'Expired']).sum()),
-            total_volume=(status_col, 'count')
-        ).reset_index()
+    # Strategic KPI Calculation
+    nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
+    nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
+    
+    # Impact Weighting (Community vs City Avg)
+    avg_vol = nexus['total_volume'].mean()
+    nexus['impact_weight'] = (nexus['total_volume'] / avg_vol).round(2)
+    
+    # Prescriptive Logic Engine
+    def get_strategic_action(row):
+        if row['churn_rate'] > 0.35 and row['impact_weight'] > 1.5:
+            return "URGENT INTERVENTION: High systemic risk in critical hub."
+        elif row['churn_rate'] > 0.35:
+            return "MONITOR: High churn localized to small cluster."
+        elif row['vitality_index'] > 85 and row['impact_weight'] > 2.0:
+            return "STRATEGIC ASSET: High-performing anchor. Expand support."
+        else:
+            return "STABLE: Standard maintenance of operations."
 
-        # KPI calculation
-        nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
-        
-        # Force Save
-        os.makedirs('data', exist_ok=True)
-        nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
-        print("SUCCESS: File generated.")
-
-    except Exception as e:
-        print(f"PIPELINE ERROR: {e}")
+    nexus['strategic_action'] = nexus.apply(get_strategic_action, axis=1)
+    
+    # Production Output
+    os.makedirs('data', exist_ok=True)
+    nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
+    print("Strategy Pipeline Success.")
 
 if __name__ == "__main__":
     run_pipeline()
