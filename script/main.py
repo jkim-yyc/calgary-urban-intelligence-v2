@@ -3,8 +3,10 @@ import requests
 import os
 import sys
 import json
+from datetime import datetime, timedelta
 
 def get_industry_sector(lt):
+    """Categorizes raw license types into strategic economic sectors."""
     lt = str(lt).upper()
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
@@ -14,29 +16,8 @@ def get_industry_sector(lt):
         'Construction & Trades': ['CONTRACTOR', 'CONSTRUCTION', 'PLUMBING', 'ELECTRICAL', 'ROOFING'],
         'Automotive Services': ['AUTO', 'VEHICLE', 'CAR WASH', 'MECHANIC', 'TIRE', 'GARAGE'],
         'Professional Services': ['CONSULTING', 'ENGINEER', 'ARCHITECT', 'ACCOUNTANT', 'LEGAL'],
-        'Education & Instruction': ['SCHOOL', 'EDUCATION', 'TUTOR', 'TRAINING', 'ACADEMY', 'YOGA', 'DANCE'],
         'Cannabis & Liquor': ['CANNABIS', 'LIQUOR', 'BREWERY', 'DISTILLERY', 'ALCOHOL'],
-        'Financial Services': ['FINANCIAL', 'BANK', 'LENDING', 'PAWN', 'INVESTMENT'],
-        'Logistics & Transport': ['TRANSPORT', 'TRUCKING', 'COURIER', 'DELIVERY', 'WAREHOUSE', 'TAXICAB'],
-        'Real Estate & Housing': ['REAL ESTATE', 'PROPERTY', 'LANDLORD', 'APARTMENT', 'LEASING'],
-        'Hospitality & Tourism': ['HOTEL', 'MOTEL', 'LODGING', 'TOURISM', 'TRAVEL', 'BED & BREAKFAST'],
-        'Entertainment & Arts': ['ENTERTAINMENT', 'THEATRE', 'CINEMA', 'ARTS', 'GALLERY', 'MUSEUM'],
-        'Manufacturing & Industrial': ['MANUFACTURING', 'FACTORY', 'PRODUCTION', 'INDUSTRIAL', 'MACHINE'],
-        'Pet & Animal Services': ['PET', 'DOG', 'ANIMAL', 'KENNEL', 'GROOMING'],
-        'Childcare Services': ['DAY CARE', 'CHILD CARE', 'PRESCHOOL'],
-        'Security & Investigation': ['SECURITY', 'INVESTIGATION', 'ALARM', 'GUARD'],
-        'Information Technology': ['SOFTWARE', 'COMPUTER', 'IT SERVICES', 'TECHNOLOGY'],
-        'Wholesale Trade': ['WHOLESALE', 'DISTRIBUTION', 'IMPORT', 'EXPORT'],
-        'Waste & Environment': ['WASTE', 'RECYCLING', 'ENVIRONMENTAL', 'CLEANING'],
-        'Fitness & Recreation': ['FITNESS', 'GYM', 'RECREATION', 'SPORTS', 'CLUB'],
-        'Media & Communication': ['MEDIA', 'PUBLISHING', 'ADVERTISING', 'MARKETING', 'PRINTING'],
-        'Energy & Utilities': ['ENERGY', 'OIL', 'GAS', 'UTILITY', 'SOLAR', 'POWER'],
-        'Non-Profit & Social': ['CHARITY', 'NON-PROFIT', 'ASSOCIATION', 'SOCIAL SERVICE'],
-        'Agriculture': ['FARM', 'AGRICULTURE', 'GREENHOUSE', 'LIVESTOCK'],
-        'Religious Services': ['CHURCH', 'RELIGIOUS', 'TEMPLE', 'MOSQUE'],
-        'Special Events': ['EVENT', 'FESTIVAL', 'MARKET', 'POP-UP'],
-        'Massage & Bodywork': ['MASSAGE', 'BODYWORK', 'REFLEXOLOGY'],
-        'Home Occupation': ['HOME OCCUPATION']
+        'Information Technology': ['SOFTWARE', 'COMPUTER', 'IT SERVICES', 'TECHNOLOGY']
     }
     for sector, keywords in mapping.items():
         if any(kw in lt for kw in keywords):
@@ -48,11 +29,10 @@ def run_pipeline():
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Nexus-Command-Center/1.0'}
 
-    # 1. SPATIAL DATA
-    spatial_id = "surr-xmvs"
-    spatial_url = f"https://data.calgary.ca/resource/{spatial_id}.geojson"
+    # 1. DOWNLOAD SPATIAL BOUNDARIES
+    spatial_url = "https://data.calgary.ca/resource/surr-xmvs.geojson"
     try:
         resp_geo = requests.get(spatial_url, headers=headers, timeout=60)
         with open(os.path.join(output_dir, 'calgary_boundaries.geojson'), 'w') as f:
@@ -60,9 +40,8 @@ def run_pipeline():
     except Exception as e:
         print(f"Spatial Error: {e}")
 
-    # 2. KPI DATA
-    dataset_id = "vdjc-pybd" 
-    url = f"https://data.calgary.ca/resource/{dataset_id}.json"
+    # 2. DOWNLOAD LICENSE DATA
+    url = "https://data.calgary.ca/resource/vdjc-pybd.json"
     params = {
         "$select": "comdistnm, jobstatusdesc, licencetypes, tradename, address, first_iss_dt",
         "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
@@ -76,33 +55,43 @@ def run_pipeline():
         print(f"Extraction Error: {e}")
         sys.exit(1)
 
-    # Clean columns
+    # 3. ATOMIC TRANSFORMATIONS
     df.columns = [c.replace('_', '').lower() for c in df.columns]
-    
-    # Fill missing community names to prevent 'Null' bars
-    df['comdistnm'] = df['comdistnm'].fillna('Unknown Community')
-    
+    df['comdistnm'] = df['comdistnm'].fillna('Unknown')
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
+    
+    # Growth Velocity Logic (Last 12 Months)
+    df['first_iss_dt'] = pd.to_datetime(df['first_iss_dt'], errors='coerce')
+    one_year_ago = datetime.now() - timedelta(days=365)
+    df['is_growth'] = (df['first_iss_dt'] >= one_year_ago).astype(int)
 
-    # Calculate Volume and Weight
+    # 4. KPI CALCULATIONS
+    # Community Volume & Impact Weight
     comm_stats = df.groupby('comdistnm').size().rename('community_volume')
     df = df.merge(comm_stats, on='comdistnm', how='left')
-    
     city_avg = comm_stats.mean()
     df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
 
-    # REVISED ACTION LOGIC: Explicit strings and no mixed types
+    # Vitality Index (Licensed Rate)
+    df['is_licensed'] = df['jobstatusdesc'].apply(lambda x: 1 if x == 'Licensed' else 0)
+    vitality = df.groupby('comdistnm')['is_licensed'].mean().round(2).rename('vitality_index')
+    df = df.merge(vitality, on='comdistnm', how='left')
+
+    # Strategic Action Logic
     def get_action(weight):
         if weight > 1.5: return "URGENT INTERVENTION"
-        elif weight > 1.0: return "MONITOR"
-        else: return "STABLE"
-
+        elif weight > 1.0: return "MONITOR FRICTION"
+        return "STABLE OPERATIONS"
     df['strategic_action'] = df['impact_weight'].apply(get_action)
 
-    # Save with specific quoting to prevent Tableau from getting confused
+    # Sector Growth Velocity
+    sector_growth = df.groupby('industry_sector')['is_growth'].sum().rename('recent_growth_count')
+    df = df.merge(sector_growth, on='industry_sector', how='left')
+
+    # 5. EXPORT
     kpi_file = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
-    df.to_csv(kpi_file, index=False, quoting=1) # quoting=1 adds quotes to all strings
-    print("Deployment Successful.")
+    df.to_csv(kpi_file, index=False, quoting=1)
+    print("Nexus Update Complete: Data/Spatial Files Synced.")
 
 if __name__ == "__main__":
     run_pipeline()
