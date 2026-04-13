@@ -9,30 +9,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Essential for the bot to save files to your repo
+      contents: write
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.9
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: Install Dependencies
         run: pip install pandas requests
-
-      - name: Execute Strategy Script
+      - name: Run Script
         run: python script/main.py
-
-      - name: Commit and Push Data
+      - name: Commit and Push
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "actions@github.com"
-          # Check if the file exists before attempting to push
           if [ -f data/calgary_strategy_kpis.csv ]; then
             git add data/calgary_strategy_kpis.csv
-            git commit -m "Strategic Update: $(date +'%Y-%m-%d')" || exit 0
+            git commit -m "Strategic Update" || exit 0
             git push
           else
             echo "Deployment Error: CSV was not generated."
