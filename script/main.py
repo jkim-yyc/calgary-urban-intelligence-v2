@@ -5,7 +5,6 @@ import sys
 import json
 
 def get_industry_sector(lt):
-    """Categorizes raw license types into 30 strategic economic sectors."""
     lt = str(lt).upper()
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
@@ -45,67 +44,65 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_pipeline():
-    # 1. SETUP PATHS
     output_dir = 'data'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     headers = {'User-Agent': 'Mozilla/5.0'}
 
-    # 2. DOWNLOAD SPATIAL BOUNDARIES (Community Map)
-    spatial_id = "surr-xmvs" # Community District Boundaries
+    # 1. SPATIAL DATA
+    spatial_id = "surr-xmvs"
     spatial_url = f"https://data.calgary.ca/resource/{spatial_id}.geojson"
-    
-    print("Nexus Step 1: Downloading Spatial Boundaries...")
     try:
         resp_geo = requests.get(spatial_url, headers=headers, timeout=60)
-        resp_geo.raise_for_status()
         with open(os.path.join(output_dir, 'calgary_boundaries.geojson'), 'w') as f:
             json.dump(resp_geo.json(), f)
-        print("Success: Spatial file saved.")
     except Exception as e:
         print(f"Spatial Error: {e}")
 
-    # 3. DOWNLOAD & PROCESS KPI DATA
+    # 2. KPI DATA
     dataset_id = "vdjc-pybd" 
     url = f"https://data.calgary.ca/resource/{dataset_id}.json"
-    
     params = {
         "$select": "comdistnm, jobstatusdesc, licencetypes, tradename, address, first_iss_dt",
         "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
         "$limit": 100000
     }
 
-    print("Nexus Step 2: Extracting License Data...")
     try:
         r = requests.get(url, params=params, headers=headers, timeout=60)
-        r.raise_for_status()
         df = pd.DataFrame(r.json())
     except Exception as e:
         print(f"Extraction Error: {e}")
         sys.exit(1)
 
+    # Clean columns
     df.columns = [c.replace('_', '').lower() for c in df.columns]
+    
+    # Fill missing community names to prevent 'Null' bars
+    df['comdistnm'] = df['comdistnm'].fillna('Unknown Community')
+    
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
 
-    # Calculate Community Context
+    # Calculate Volume and Weight
     comm_stats = df.groupby('comdistnm').size().rename('community_volume')
     df = df.merge(comm_stats, on='comdistnm', how='left')
     
     city_avg = comm_stats.mean()
     df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
 
-    def get_action(row):
-        if row['impact_weight'] > 1.5: return "URGENT INTERVENTION: High-impact hub."
-        elif row['impact_weight'] > 1.0: return "MONITOR: Moderate significance."
-        else: return "STABLE: Localized cluster."
+    # REVISED ACTION LOGIC: Explicit strings and no mixed types
+    def get_action(weight):
+        if weight > 1.5: return "URGENT INTERVENTION"
+        elif weight > 1.0: return "MONITOR"
+        else: return "STABLE"
 
-    df['strategic_action'] = df.apply(get_action, axis=1)
+    df['strategic_action'] = df['impact_weight'].apply(get_action)
 
-    # Save KPI Dataset
+    # Save with specific quoting to prevent Tableau from getting confused
     kpi_file = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
-    df.to_csv(kpi_file, index=False)
-    print(f"Deployment Successful: All Nexus files updated in /{output_dir}")
+    df.to_csv(kpi_file, index=False, quoting=1) # quoting=1 adds quotes to all strings
+    print("Deployment Successful.")
 
 if __name__ == "__main__":
     run_pipeline()
