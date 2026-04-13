@@ -43,68 +43,86 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_pipeline():
-    # Attempting to reach the most stable Business License endpoints
-    endpoints = ["g5zp-p86c", "864q-7v6g"]
+    # Expanded list of potential dataset IDs (Legacy + Current + Related)
+    endpoints = ["g5zp-p86c", "864q-7v6g", "6h66-y7v6", "kxpt-p8m8"]
     df = None
 
     for eid in endpoints:
         try:
-            url = f"https://data.calgary.ca/resource/{eid}.json"
-            r = requests.get(url, params={"$limit": 100000}, timeout=30)
-            if r.status_code == 200:
+            # Try JSON first
+            url = f"https://data.calgary.ca/resource/{eid}.json?$limit=100000"
+            print(f"Checking endpoint: {url}")
+            r = requests.get(url, timeout=30)
+            if r.status_code == 200 and len(r.json()) > 0:
                 df = pd.DataFrame(r.json())
-                print(f"Extraction Successful from {eid}")
                 break
-        except Exception:
+            
+            # Try CSV fallback for the same ID
+            csv_url = f"https://data.calgary.ca/resource/{eid}.csv?$limit=100000"
+            r_csv = requests.get(csv_url, timeout=30)
+            if r_csv.status_code == 200:
+                from io import StringIO
+                df = pd.read_csv(StringIO(r_csv.text))
+                break
+        except Exception as e:
+            print(f"Error on {eid}: {e}")
             continue
 
     if df is None or df.empty:
-        print("CRITICAL: Data extraction failed.")
+        print("CRITICAL: All extraction methods failed. The API may be down or the IDs have changed.")
         sys.exit(1)
 
-    # Normalize Headers
+    # Normalize column names to lowercase with no underscores
     df.columns = [c.replace('_', '').lower() for c in df.columns]
     
-    # Dynamic Column Discovery
-    comm_col = next((c for c in df.columns if 'comm' in c or 'dist' in c), None)
+    # Advanced Column Finder (Looks for keywords in column names)
+    comm_col = next((c for c in df.columns if any(k in c for k in ['comm', 'dist', 'ward'])), None)
     status_col = next((c for c in df.columns if 'status' in c), None)
-    type_col = next((c for c in df.columns if 'type' in c or 'tid' in c), None)
+    type_col = next((c for c in df.columns if any(k in c for k in ['type', 'tid', 'class'])), None)
 
-    # Apply Sector Mapping (Atomic Level)
-    df['industry_sector'] = df[type_col].fillna('UNKNOWN').apply(get_industry_sector)
+    if not all([comm_col, status_col, type_col]):
+        print(f"Mapping Failure. Found: Comm={comm_col}, Status={status_col}, Type={type_col}")
+        sys.exit(1)
 
-    # Strategic Aggregation (Collapse to Community + Sector)
+    # Convert columns to string to avoid attribute errors during mapping
+    df[type_col] = df[type_col].astype(str)
+    df[status_col] = df[status_col].astype(str)
+
+    # Atomic record mapping
+    df['industry_sector'] = df[type_col].apply(get_industry_sector)
+
+    # Aggregation to Community + Sector
     nexus = df.groupby([comm_col, 'industry_sector']).agg(
-        active_licenses=(status_col, lambda x: (x.astype(str).str.contains('Issued', case=False)).sum()),
-        churn_events=(status_col, lambda x: (x.astype(str).str.contains('Cancelled|Expired', case=False)).sum()),
+        active_licenses=(status_col, lambda x: (x.str.contains('Issued', case=False, na=False)).sum()),
+        churn_events=(status_col, lambda x: (x.str.contains('Cancelled|Expired', case=False, na=False)).sum()),
         total_volume=(status_col, 'count')
     ).reset_index()
 
-    # KPI Math
+    # Calculation Layer
     nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
     nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
     
-    # Impact Weighting (Is this a major hub?)
+    # Impact Weighting (Community scale vs Sector Average)
     avg_vol = nexus['total_volume'].mean()
     nexus['impact_weight'] = (nexus['total_volume'] / avg_vol).round(2)
     
-    # Prescriptive Action Logic
+    # Strategic Recommendation Logic
     def get_action(row):
         if row['churn_rate'] > 0.35 and row['impact_weight'] > 1.5:
-            return "URGENT INTERVENTION: High systemic risk in critical economic hub."
+            return "URGENT: High-impact sector failure. Immediate policy review recommended."
         elif row['churn_rate'] > 0.35:
-            return "MONITOR: Elevated churn in localized cluster."
+            return "MONITOR: Elevated volatility in niche cluster."
         elif row['vitality_index'] > 85 and row['impact_weight'] > 2.0:
-            return "STRATEGIC ASSET: High-performing anchor sector."
+            return "STRENGTH: Significant economic anchor. Optimize for growth."
         else:
-            return "STABLE: Standard maintenance of operations."
+            return "STABLE: Performant sector. No immediate action."
 
     nexus['strategic_action'] = nexus.apply(get_action, axis=1)
     
-    # Save Production File
+    # Output
     os.makedirs('data', exist_ok=True)
     nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
-    print("Nexus Pipeline Success.")
+    print("Success: Pipeline generated strategic output.")
 
 if __name__ == "__main__":
     run_pipeline()
