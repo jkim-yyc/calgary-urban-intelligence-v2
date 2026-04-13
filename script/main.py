@@ -44,26 +44,33 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_nexus_pipeline():
-    print("Step 1: Fetching data from Calgary API...")
+    print("--- Starting Nexus Pipeline ---")
     try:
+        # Step 1: Fetch Data
         response = requests.get(API_URL, params={"$limit": 50000})
         df = pd.DataFrame(response.json())
-        print(f"Data received: {len(df)} rows.")
-        
-        # Normalize columns (Remove underscores and lowercase)
+        print(f"Check 1: Received {len(df)} rows from API.")
+
+        # Step 2: Clean Columns
         df.columns = [c.replace('_', '').lower() for c in df.columns]
         
-        # Check for essential columns
-        required = ['comdistnm', 'licencestatus', 'licencetypes']
-        # Calgary API sometimes uses 'communityname' instead of 'comdistnm'
-        if 'communityname' in df.columns:
-            df.rename(columns={'communityname': 'comdistnm'}, inplace=True)
-            
-        print("Step 2: Mapping Industry Sectors...")
+        # Identify the community name column (it varies in Calgary's API)
+        col_map = {'comdistnm': 'community', 'communityname': 'community', 'community_name': 'community'}
+        for old_col, new_col in col_map.items():
+            if old_col in df.columns:
+                df.rename(columns={old_col: new_col}, inplace=True)
+        
+        if 'community' not in df.columns:
+            print(f"Error: Could not find community column. Found: {df.columns.tolist()}")
+            return
+
+        # Step 3: Map Sectors
+        print("Check 2: Mapping industry sectors...")
         df['industry_sector'] = df['licencetypes'].apply(get_industry_sector)
 
-        print("Step 3: Aggregating KPIs...")
-        nexus_data = df.groupby(['comdistnm', 'industry_sector']).agg(
+        # Step 4: Aggregate
+        print("Check 3: Calculating KPIs...")
+        nexus_data = df.groupby(['community', 'industry_sector']).agg(
             active_licenses=('licencestatus', lambda x: (x == 'Issued').sum()),
             churn_events=('licencestatus', lambda x: x.isin(['Cancelled', 'Expired']).sum()),
             total_volume=('licencestatus', 'count')
@@ -71,17 +78,16 @@ def run_nexus_pipeline():
 
         nexus_data['churn_rate'] = (nexus_data['churn_events'] / nexus_data['total_volume']).fillna(0)
         
-        print("Step 4: Saving CSV to /data folder...")
+        # Step 5: Save
         os.makedirs('data', exist_ok=True)
-        # Use an absolute-style relative path
-        file_path = os.path.join(os.getcwd(), 'data', 'calgary_strategy_kpis.csv')
+        file_path = 'data/calgary_strategy_kpis.csv'
         nexus_data.to_csv(file_path, index=False)
         
         if os.path.exists(file_path):
-            print(f"SUCCESS: File created at {file_path}")
+            print(f"Check 4: SUCCESS. File saved to {file_path}")
         else:
-            print("ERROR: File was not saved to disk.")
-        
+            print("Check 4: FAILED to save file.")
+
     except Exception as e:
         print(f"CRITICAL ERROR: {str(e)}")
 
