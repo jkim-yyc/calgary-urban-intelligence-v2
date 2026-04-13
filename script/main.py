@@ -4,6 +4,7 @@ import os
 import sys
 
 def get_industry_sector(lt):
+    """Categorizes raw license types into strategic economic sectors."""
     lt = str(lt).upper()
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
@@ -46,44 +47,48 @@ def run_pipeline():
     dataset_id = "vdjc-pybd" 
     url = f"https://data.calgary.ca/resource/{dataset_id}.json"
     
+    # Expanded Select list to include all your requested fields
     params = {
-        "$select": "comdistnm, jobstatusdesc, licencetypes",
+        "$select": "comdistnm, jobstatusdesc, licencetypes, tradename, address, first_iss_dt",
         "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
         "$limit": 100000
     }
     
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
 
     try:
+        print(f"Connecting to Calgary Data Hub...")
         r = requests.get(url, params=params, headers=headers, timeout=60)
         r.raise_for_status()
         df = pd.DataFrame(r.json())
+        print(f"Extraction Successful: Found {len(df)} records.")
     except Exception as e:
-        print(f"Extraction Error: {e}")
+        print(f"CRITICAL EXTRACTION ERROR: {e}")
         sys.exit(1)
 
-    # Core logic
-    df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
-    nexus = df.groupby(['comdistnm', 'industry_sector']).agg(
-        active_licenses=('jobstatusdesc', lambda x: (x.str.contains('Licensed', case=False)).sum()),
-        total_volume=('jobstatusdesc', 'count')
-    ).reset_index()
-
-    nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
+    # Clean headers and find columns
+    df.columns = [c.replace('_', '').lower() for c in df.columns]
     
-    # SAVE FIX: Create directory and save using absolute path logic
+    # Process Atomic Records
+    df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
+    
+    # Add a Binary Metric for Tableau (1 for Active, 0 for Friction/Pending)
+    df['is_active_binary'] = df['jobstatusdesc'].str.contains('Licensed', case=False).astype(int)
+
+    # Save the FULL atomic data so Tableau can filter by Trade Name or Address
     output_dir = 'data'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     file_path = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
-    nexus.to_csv(file_path, index=False)
+    df.to_csv(file_path, index=False)
     
-    # Double check if file exists for the logs
     if os.path.exists(file_path):
-        print(f"SUCCESS: File created at {file_path}")
+        print(f"Nexus Build Complete: {file_path}")
     else:
-        print("ERROR: File was not created.")
+        print("ERROR: File creation failed.")
         sys.exit(1)
 
 if __name__ == "__main__":
