@@ -5,10 +5,7 @@ import os
 API_URL = "https://data.calgary.ca/resource/6h66-y7v6.json"
 
 def get_industry_sector(lt):
-    """Categorizes raw licence types into 30 Strategic Sectors."""
     lt = str(lt).upper()
-    
-    # Mapping Dictionary: Key = Sector Name, Value = Keywords to search for
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
         'Retail - General': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'VARIETY'],
@@ -41,39 +38,52 @@ def get_industry_sector(lt):
         'Massage & Bodywork': ['MASSAGE', 'BODYWORK', 'REFLEXOLOGY'],
         'Home Occupation': ['HOME OCCUPATION']
     }
-    
     for sector, keywords in mapping.items():
         if any(kw in lt for kw in keywords):
             return sector
     return 'Other/Diversified'
 
 def run_nexus_pipeline():
+    print("Step 1: Fetching data from Calgary API...")
     try:
         response = requests.get(API_URL, params={"$limit": 50000})
         df = pd.DataFrame(response.json())
+        print(f"Data received: {len(df)} rows.")
+        
+        # Normalize columns (Remove underscores and lowercase)
         df.columns = [c.replace('_', '').lower() for c in df.columns]
         
-        # 1. Apply Industry Sector Mapping
+        # Check for essential columns
+        required = ['comdistnm', 'licencestatus', 'licencetypes']
+        # Calgary API sometimes uses 'communityname' instead of 'comdistnm'
+        if 'communityname' in df.columns:
+            df.rename(columns={'communityname': 'comdistnm'}, inplace=True)
+            
+        print("Step 2: Mapping Industry Sectors...")
         df['industry_sector'] = df['licencetypes'].apply(get_industry_sector)
 
-        # 2. Aggregation - Group by Community AND Industry Sector
-        # This allows you to see which sectors are thriving/dying in specific wards
-        nexus_data = df.groupby(['communityname', 'industry_sector']).agg(
+        print("Step 3: Aggregating KPIs...")
+        nexus_data = df.groupby(['comdistnm', 'industry_sector']).agg(
             active_licenses=('licencestatus', lambda x: (x == 'Issued').sum()),
             churn_events=('licencestatus', lambda x: x.isin(['Cancelled', 'Expired']).sum()),
             total_volume=('licencestatus', 'count')
         ).reset_index()
 
-        # KPI: Churn Rate
         nexus_data['churn_rate'] = (nexus_data['churn_events'] / nexus_data['total_volume']).fillna(0)
         
-        # 3. Save Output
+        print("Step 4: Saving CSV to /data folder...")
         os.makedirs('data', exist_ok=True)
-        nexus_data.to_csv('data/calgary_strategy_kpis.csv', index=False)
-        print("Success: 30-Sector Strategic Mapping Complete.")
+        # Use an absolute-style relative path
+        file_path = os.path.join(os.getcwd(), 'data', 'calgary_strategy_kpis.csv')
+        nexus_data.to_csv(file_path, index=False)
+        
+        if os.path.exists(file_path):
+            print(f"SUCCESS: File created at {file_path}")
+        else:
+            print("ERROR: File was not saved to disk.")
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"CRITICAL ERROR: {str(e)}")
 
 if __name__ == "__main__":
     run_nexus_pipeline()
