@@ -2,13 +2,13 @@ name: Nexus_Update
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0' # Automatically runs at Midnight every Sunday
+    - cron: '0 0 * * 0'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Essential for the bot to save the CSV to your repo
+      contents: write
     steps:
       - uses: actions/checkout@v4
       
@@ -20,13 +20,19 @@ jobs:
       - name: Install dependencies
         run: pip install pandas requests
         
-      - name: Execute Strategy Engine
+      - name: Run Strategy Engine
         run: python script/main.py
         
-      - name: Commit and Push Results
+      - name: Commit and Push
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "actions@github.com"
-          git add data/calgary_strategy_kpis.csv
-          git commit -m "Strategic Intelligence Update: $(date +'%Y-%m-%d')" || exit 0
-          git push
+          # Only proceed if the file exists
+          if [ -f data/calgary_strategy_kpis.csv ]; then
+            git add data/calgary_strategy_kpis.csv
+            git commit -m "Strategic Update: $(date +'%Y-%m-%d')" || exit 0
+            git push
+          else
+            echo "File not found, skipping git push."
+            exit 1
+          fi
