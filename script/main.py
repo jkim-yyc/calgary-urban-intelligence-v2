@@ -16,6 +16,7 @@ def get_industry_sector(lt):
         'Construction & Trades': ['CONTRACTOR', 'CONSTRUCTION', 'PLUMBING', 'ELECTRICAL', 'ROOFING'],
         'Automotive Services': ['AUTO', 'VEHICLE', 'CAR WASH', 'MECHANIC', 'TIRE', 'GARAGE'],
         'Professional Services': ['CONSULTING', 'ENGINEER', 'ARCHITECT', 'ACCOUNTANT', 'LEGAL'],
+        'Education & Instruction': ['SCHOOL', 'EDUCATION', 'TUTOR', 'TRAINING', 'ACADEMY'],
         'Cannabis & Liquor': ['CANNABIS', 'LIQUOR', 'BREWERY', 'DISTILLERY', 'ALCOHOL'],
         'Information Technology': ['SOFTWARE', 'COMPUTER', 'IT SERVICES', 'TECHNOLOGY']
     }
@@ -29,9 +30,9 @@ def run_pipeline():
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    headers = {'User-Agent': 'Nexus-Command-Center/1.0'}
+    headers = {'User-Agent': 'Nexus-Strategy-Engine/1.0'}
 
-    # 1. DOWNLOAD SPATIAL BOUNDARIES
+    # 1. DOWNLOAD SPATIAL DATA
     spatial_url = "https://data.calgary.ca/resource/surr-xmvs.geojson"
     try:
         resp_geo = requests.get(spatial_url, headers=headers, timeout=60)
@@ -55,43 +56,38 @@ def run_pipeline():
         print(f"Extraction Error: {e}")
         sys.exit(1)
 
-    # 3. ATOMIC TRANSFORMATIONS
+    # 3. PROCESSING
     df.columns = [c.replace('_', '').lower() for c in df.columns]
     df['comdistnm'] = df['comdistnm'].fillna('Unknown')
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
     
-    # Growth Velocity Logic (Last 12 Months)
+    # Growth Logic
     df['first_iss_dt'] = pd.to_datetime(df['first_iss_dt'], errors='coerce')
     one_year_ago = datetime.now() - timedelta(days=365)
     df['is_growth'] = (df['first_iss_dt'] >= one_year_ago).astype(int)
 
-    # 4. KPI CALCULATIONS
-    # Community Volume & Impact Weight
+    # 4. KPI GENERATION
     comm_stats = df.groupby('comdistnm').size().rename('community_volume')
     df = df.merge(comm_stats, on='comdistnm', how='left')
     city_avg = comm_stats.mean()
     df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
 
-    # Vitality Index (Licensed Rate)
     df['is_licensed'] = df['jobstatusdesc'].apply(lambda x: 1 if x == 'Licensed' else 0)
     vitality = df.groupby('comdistnm')['is_licensed'].mean().round(2).rename('vitality_index')
     df = df.merge(vitality, on='comdistnm', how='left')
 
-    # Strategic Action Logic
     def get_action(weight):
         if weight > 1.5: return "URGENT INTERVENTION"
         elif weight > 1.0: return "MONITOR FRICTION"
         return "STABLE OPERATIONS"
     df['strategic_action'] = df['impact_weight'].apply(get_action)
 
-    # Sector Growth Velocity
     sector_growth = df.groupby('industry_sector')['is_growth'].sum().rename('recent_growth_count')
     df = df.merge(sector_growth, on='industry_sector', how='left')
 
-    # 5. EXPORT
-    kpi_file = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
-    df.to_csv(kpi_file, index=False, quoting=1)
-    print("Nexus Update Complete: Data/Spatial Files Synced.")
+    # 5. OUTPUT
+    df.to_csv(os.path.join(output_dir, 'calgary_strategy_kpis.csv'), index=False, quoting=1)
+    print("Files updated successfully.")
 
 if __name__ == "__main__":
     run_pipeline()
