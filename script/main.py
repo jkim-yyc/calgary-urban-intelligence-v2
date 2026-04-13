@@ -42,7 +42,9 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_pipeline():
-    url = "https://data.calgary.ca/resource/6h66-y7v6.json"
+    # Updated Dataset ID for Calgary Business Licenses
+    url = "https://data.calgary.ca/resource/864q-7v6g.json"
+    
     r = requests.get(url, params={"$limit": 50000})
     r.raise_for_status()
     df = pd.DataFrame(r.json())
@@ -50,23 +52,22 @@ def run_pipeline():
     # Normalize headers
     df.columns = [c.replace('_', '').lower() for c in df.columns]
     
-    # Robust Atomic Column Detection
-    # Searches for 'comm' (Community), 'status' (License Status), and 'type' (License Type)
+    # Dynamic column identification to prevent KeyErrors
     comm_col = next((c for c in df.columns if 'comm' in c), 'comdistnm')
     status_col = next((c for c in df.columns if 'status' in c), 'licencestatus')
     type_col = next((c for c in df.columns if 'type' in c), 'licencetypes')
 
-    # Atomic-to-Sector Mapping
+    # Atomic record mapping
     df['industry_sector'] = df[type_col].apply(get_industry_sector)
 
-    # Aggregation
+    # Community + Sector Aggregation
     nexus = df.groupby([comm_col, 'industry_sector']).agg(
         active_licenses=(status_col, lambda x: (x.astype(str).str.contains('Issued', case=False)).sum()),
         churn_events=(status_col, lambda x: (x.astype(str).str.contains('Cancelled|Expired', case=False)).sum()),
         total_volume=(status_col, 'count')
     ).reset_index()
 
-    # Community KPI Logic
+    # Community KPI Calculation
     nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
     nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
     
@@ -74,12 +75,12 @@ def run_pipeline():
     avg_vol = nexus['total_volume'].mean()
     nexus['impact_weight'] = (nexus['total_volume'] / avg_vol).round(2)
     
-    # Prescriptive Action Logic
+    # Prescriptive Strategic Action
     def get_action(row):
         if row['churn_rate'] > 0.35 and row['impact_weight'] > 1.5:
-            return "URGENT INTERVENTION: High systemic risk in high-volume hub."
+            return "URGENT INTERVENTION: Systemic risk in critical economic hub."
         elif row['churn_rate'] > 0.35:
-            return "MONITOR: Localized churn detected in small cluster."
+            return "MONITOR: Elevated churn in localized cluster."
         elif row['vitality_index'] > 85 and row['impact_weight'] > 2.0:
             return "STRATEGIC ASSET: High-performing anchor sector."
         else:
@@ -89,7 +90,7 @@ def run_pipeline():
     
     os.makedirs('data', exist_ok=True)
     nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
-    print("Nexus Build Successful.")
+    print("Nexus Strategic Update Complete.")
 
 if __name__ == "__main__":
     run_pipeline()
