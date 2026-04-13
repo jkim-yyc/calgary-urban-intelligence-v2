@@ -14,8 +14,7 @@ jobs:
         with:
           python-version: '3.9'
       - run: pip install pandas requests
-      - name: Run Strategy Engine
-        run: python script/main.py
+      - run: python script/main.py
       - name: Commit and Push
         run: |
           git config --global user.name "Nexus-Bot"
@@ -25,6 +24,6 @@ jobs:
             git commit -m "Strategic Update: $(date +'%Y-%m-%d')" || exit 0
             git push
           else
-            echo "Error: Output file not found."
+            echo "CSV not found. Script failed to produce output."
             exit 1
           fi
