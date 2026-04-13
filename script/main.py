@@ -2,9 +2,10 @@ import pandas as pd
 import requests
 import os
 import sys
+import json
 
 def get_industry_sector(lt):
-    """Categorizes raw license types into strategic economic sectors."""
+    """Categorizes raw license types into 30 strategic economic sectors."""
     lt = str(lt).upper()
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
@@ -44,52 +45,67 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_pipeline():
+    # 1. SETUP PATHS
+    output_dir = 'data'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    headers = {'User-Agent': 'Mozilla/5.0'}
+
+    # 2. DOWNLOAD SPATIAL BOUNDARIES (Community Map)
+    spatial_id = "surr-xmvs" # Community District Boundaries
+    spatial_url = f"https://data.calgary.ca/resource/{spatial_id}.geojson"
+    
+    print("Nexus Step 1: Downloading Spatial Boundaries...")
+    try:
+        resp_geo = requests.get(spatial_url, headers=headers, timeout=60)
+        resp_geo.raise_for_status()
+        with open(os.path.join(output_dir, 'calgary_boundaries.geojson'), 'w') as f:
+            json.dump(resp_geo.json(), f)
+        print("Success: Spatial file saved.")
+    except Exception as e:
+        print(f"Spatial Error: {e}")
+
+    # 3. DOWNLOAD & PROCESS KPI DATA
     dataset_id = "vdjc-pybd" 
     url = f"https://data.calgary.ca/resource/{dataset_id}.json"
     
-    # Expanded Select list to include all your requested fields
     params = {
         "$select": "comdistnm, jobstatusdesc, licencetypes, tradename, address, first_iss_dt",
         "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
         "$limit": 100000
     }
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
 
+    print("Nexus Step 2: Extracting License Data...")
     try:
-        print(f"Connecting to Calgary Data Hub...")
         r = requests.get(url, params=params, headers=headers, timeout=60)
         r.raise_for_status()
         df = pd.DataFrame(r.json())
-        print(f"Extraction Successful: Found {len(df)} records.")
     except Exception as e:
-        print(f"CRITICAL EXTRACTION ERROR: {e}")
+        print(f"Extraction Error: {e}")
         sys.exit(1)
 
-    # Clean headers and find columns
     df.columns = [c.replace('_', '').lower() for c in df.columns]
-    
-    # Process Atomic Records
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
-    
-    # Add a Binary Metric for Tableau (1 for Active, 0 for Friction/Pending)
-    df['is_active_binary'] = df['jobstatusdesc'].str.contains('Licensed', case=False).astype(int)
 
-    # Save the FULL atomic data so Tableau can filter by Trade Name or Address
-    output_dir = 'data'
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # Calculate Community Context
+    comm_stats = df.groupby('comdistnm').size().rename('community_volume')
+    df = df.merge(comm_stats, on='comdistnm', how='left')
     
-    file_path = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
-    df.to_csv(file_path, index=False)
-    
-    if os.path.exists(file_path):
-        print(f"Nexus Build Complete: {file_path}")
-    else:
-        print("ERROR: File creation failed.")
-        sys.exit(1)
+    city_avg = comm_stats.mean()
+    df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
+
+    def get_action(row):
+        if row['impact_weight'] > 1.5: return "URGENT INTERVENTION: High-impact hub."
+        elif row['impact_weight'] > 1.0: return "MONITOR: Moderate significance."
+        else: return "STABLE: Localized cluster."
+
+    df['strategic_action'] = df.apply(get_action, axis=1)
+
+    # Save KPI Dataset
+    kpi_file = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
+    df.to_csv(kpi_file, index=False)
+    print(f"Deployment Successful: All Nexus files updated in /{output_dir}")
 
 if __name__ == "__main__":
     run_pipeline()
