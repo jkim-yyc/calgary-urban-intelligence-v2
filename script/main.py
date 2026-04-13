@@ -15,7 +15,7 @@ def run_nexus_pipeline():
         return
 
     # 2. Strategic Aggregation (KPI Logic)
-    # We group by community to turn license-level data into strategy-level insights
+    # Group by community to turn license-level data into strategy-level insights
     nexus_data = df.groupby('communityname').agg(
         active_licenses=('licencestatus', lambda x: (x == 'Issued').sum()),
         churn_events=('licencestatus', lambda x: x.isin(['Cancelled', 'Expired']).sum()),
@@ -29,6 +29,10 @@ def run_nexus_pipeline():
     retail = df[df['licencetid'] == 'RETAIL'].groupby('communityname').size().reset_index(name='retail_density')
     final_output = pd.merge(nexus_data, retail, on='communityname', how='left').fillna(0)
 
-    # 3. Save Output
+    # 3. Save Output - Ensure the directory exists and the string is closed
     os.makedirs('data', exist_ok=True)
-    final_output.to_csv('data/calgary_strategy_k
+    final_output.to_csv('data/calgary_strategy_kpis.csv', index=False)
+    print("Success: CSV updated in /data folder.")
+
+if __name__ == "__main__":
+    run_nexus_pipeline()
