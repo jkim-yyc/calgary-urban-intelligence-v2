@@ -21,9 +21,9 @@ jobs:
           git config --global user.email "actions@github.com"
           if [ -f data/calgary_strategy_kpis.csv ]; then
             git add data/calgary_strategy_kpis.csv
-            git commit -m "Strategic Update: $(date +'%Y-%m-%d')" || exit 0
+            git commit -m "Strategic Intelligence Update: $(date +'%Y-%m-%d')" || exit 0
             git push
           else
-            echo "CSV not found. Script failed to produce output."
+            echo "Pipeline failed to generate output."
             exit 1
           fi
