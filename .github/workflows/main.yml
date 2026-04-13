@@ -2,8 +2,8 @@ name: Nexus_Update
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # Runs every Sunday at midnight
-  workflow_dispatch: # Manual trigger button
+    - cron: '0 0 * * 0' 
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -29,6 +29,14 @@ jobs:
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "actions@github.com"
-          git add data/calgary_strategy_kpis.csv
-          git commit -m "Automated Weekly Strategic Refresh" || exit 0
-          git push
+          # This line ensures the folder exists in the runner's environment
+          mkdir -p data 
+          # Only try to add if the file actually exists to avoid the fatal error
+          if [ -f data/calgary_strategy_kpis.csv ]; then
+            git add data/calgary_strategy_kpis.csv
+            git commit -m "Automated Weekly Strategic Refresh" || exit 0
+            git push
+          else
+            echo "Error: CSV file was not created by the script."
+            exit 1
+          fi
