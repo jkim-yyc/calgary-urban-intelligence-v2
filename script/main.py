@@ -16,7 +16,6 @@ def get_industry_sector(lt):
         'Construction & Trades': ['CONTRACTOR', 'CONSTRUCTION', 'PLUMBING', 'ELECTRICAL', 'ROOFING'],
         'Automotive Services': ['AUTO', 'VEHICLE', 'CAR WASH', 'MECHANIC', 'TIRE', 'GARAGE'],
         'Professional Services': ['CONSULTING', 'ENGINEER', 'ARCHITECT', 'ACCOUNTANT', 'LEGAL'],
-        'Education & Instruction': ['SCHOOL', 'EDUCATION', 'TUTOR', 'TRAINING', 'ACADEMY'],
         'Cannabis & Liquor': ['CANNABIS', 'LIQUOR', 'BREWERY', 'DISTILLERY', 'ALCOHOL'],
         'Information Technology': ['SOFTWARE', 'COMPUTER', 'IT SERVICES', 'TECHNOLOGY']
     }
@@ -24,6 +23,22 @@ def get_industry_sector(lt):
         if any(kw in lt for kw in keywords):
             return sector
     return 'Other/Diversified'
+
+def get_action(row):
+    """Tri-Factor Risk Model: Calculates priority based on Impact, Vitality, and Velocity."""
+    weight = row['impact_weight']
+    vitality = row['vitality_index']
+    growth = row['recent_growth_count']
+    
+    # URGENT: High Impact + High Friction OR High Impact + Explosive Growth causing Friction
+    if (weight > 1.5 and vitality < 0.80) or (weight > 1.2 and growth > 20 and vitality < 0.85):
+        return "URGENT INTERVENTION"
+    # MONITOR: High growth hotspots or moderate impact areas with dipping health
+    elif growth > 15 or vitality < 0.90 or weight > 1.0:
+        return "MONITOR FRICTION"
+    # STABLE: High vitality and manageable growth
+    else:
+        return "STABLE OPERATIONS"
 
 def run_pipeline():
     output_dir = 'data'
@@ -56,38 +71,38 @@ def run_pipeline():
         print(f"Extraction Error: {e}")
         sys.exit(1)
 
-    # 3. PROCESSING
+    # 3. CORE TRANSFORMATIONS
     df.columns = [c.replace('_', '').lower() for c in df.columns]
     df['comdistnm'] = df['comdistnm'].fillna('Unknown')
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
     
-    # Growth Logic
+    # Calculate Growth (Velocity)
     df['first_iss_dt'] = pd.to_datetime(df['first_iss_dt'], errors='coerce')
     one_year_ago = datetime.now() - timedelta(days=365)
     df['is_growth'] = (df['first_iss_dt'] >= one_year_ago).astype(int)
 
-    # 4. KPI GENERATION
+    # 4. KPI CALCULATIONS (Tri-Factor)
+    # Impact Weight
     comm_stats = df.groupby('comdistnm').size().rename('community_volume')
     df = df.merge(comm_stats, on='comdistnm', how='left')
     city_avg = comm_stats.mean()
     df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
 
+    # Vitality Index
     df['is_licensed'] = df['jobstatusdesc'].apply(lambda x: 1 if x == 'Licensed' else 0)
     vitality = df.groupby('comdistnm')['is_licensed'].mean().round(2).rename('vitality_index')
     df = df.merge(vitality, on='comdistnm', how='left')
 
-    def get_action(weight):
-        if weight > 1.5: return "URGENT INTERVENTION"
-        elif weight > 1.0: return "MONITOR FRICTION"
-        return "STABLE OPERATIONS"
-    df['strategic_action'] = df['impact_weight'].apply(get_action)
-
+    # Sector Velocity (Growth Count per Sector)
     sector_growth = df.groupby('industry_sector')['is_growth'].sum().rename('recent_growth_count')
     df = df.merge(sector_growth, on='industry_sector', how='left')
 
-    # 5. OUTPUT
+    # 5. STRATEGIC ACTION (The Decision Logic)
+    df['strategic_action'] = df.apply(get_action, axis=1)
+
+    # 6. EXPORT
     df.to_csv(os.path.join(output_dir, 'calgary_strategy_kpis.csv'), index=False, quoting=1)
-    print("Files updated successfully.")
+    print("Strategy Update Success: Data Synced to /data.")
 
 if __name__ == "__main__":
     run_pipeline()
