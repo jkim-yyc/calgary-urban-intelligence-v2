@@ -3,7 +3,6 @@ import requests
 import os
 
 def get_industry_sector(lt):
-    """Categorizes raw licence types into Strategic Sectors."""
     lt = str(lt).upper()
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
@@ -45,40 +44,39 @@ def get_industry_sector(lt):
 def run_pipeline():
     url = "https://data.calgary.ca/resource/6h66-y7v6.json"
     try:
-        print("Step 1: Fetching Calgary Open Data...")
+        print("Fetching data...")
         r = requests.get(url, params={"$limit": 50000})
         df = pd.DataFrame(r.json())
         
-        # Normalize columns (lowercase and remove underscores)
+        # Clean columns
         df.columns = [c.replace('_', '').lower() for c in df.columns]
         
-        # Dynamic Column Finding: Find the community column regardless of API changes
+        # Find community column
         comm_col = next((c for c in df.columns if 'comm' in c), None)
         status_col = 'licencestatus' if 'licencestatus' in df.columns else df.columns[2]
         type_col = 'licencetypes' if 'licencetypes' in df.columns else None
 
         if not comm_col or not type_col:
-            print("Error: Required columns not found.")
+            print("Missing core columns.")
             return
 
-        print(f"Step 2: Analyzing {len(df)} rows for Community: {comm_col}")
-        
-        # Apply Mapping
+        print(f"Mapping and aggregating...")
         df['industry_sector'] = df[type_col].apply(get_industry_sector)
 
-        # Step 3: Strategic Aggregation
+        # Aggregation Logic
         nexus = df.groupby([comm_col, 'industry_sector']).agg(
             active_licenses=(status_col, lambda x: (x == 'Issued').sum()),
             churn_events=(status_col, lambda x: x.isin(['Cancelled', 'Expired']).sum()),
             total_volume=(status_col, 'count')
         ).reset_index()
 
-        nexus['churn_rate'] = (nexus['churn_events'] / nexus_data['total_volume']).fillna(0)
+        # KPI calculation
+        nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
         
-        # Step 4: Force Save to /data
+        # Force Save
         os.makedirs('data', exist_ok=True)
         nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
-        print("SUCCESS: Strategic Intelligence file created.")
+        print("SUCCESS: File generated.")
 
     except Exception as e:
         print(f"PIPELINE ERROR: {e}")
