@@ -4,7 +4,6 @@ import os
 import sys
 
 def get_industry_sector(lt):
-    """Categorizes raw license types into 30 strategic economic sectors."""
     lt = str(lt).upper()
     mapping = {
         'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
@@ -47,55 +46,45 @@ def run_pipeline():
     dataset_id = "vdjc-pybd" 
     url = f"https://data.calgary.ca/resource/{dataset_id}.json"
     
-    # FIXED: Using 'jobstatusdesc' instead of 'licencestatus'
-    # FIXED: Using Calgary's specific status values
     params = {
         "$select": "comdistnm, jobstatusdesc, licencetypes",
         "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
         "$limit": 100000
     }
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
     try:
-        print(f"Connecting to Calgary Data Hub...")
         r = requests.get(url, params=params, headers=headers, timeout=60)
         r.raise_for_status()
         df = pd.DataFrame(r.json())
-        print(f"Data successfully retrieved: {len(df)} rows.")
     except Exception as e:
-        print(f"CRITICAL EXTRACTION ERROR: {e}")
-        # Print the response body to debug the 400 error further if it persists
-        if 'r' in locals():
-            print(f"Response Body: {r.text}")
+        print(f"Extraction Error: {e}")
         sys.exit(1)
 
-    # 3. ATOMIC TO AGGREGATE PROCESSING
+    # Core logic
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
-
-    # Status Logic: "Active" vs "Churn-Risk"
-    # Calgary doesn't show historic 'Cancelled' in the current active view, 
-    # so we track 'Invoiced' and 'Pending' as potential churn/friction points.
     nexus = df.groupby(['comdistnm', 'industry_sector']).agg(
         active_licenses=('jobstatusdesc', lambda x: (x.str.contains('Licensed', case=False)).sum()),
-        admin_friction=('jobstatusdesc', lambda x: (x.str.contains('Invoiced|Pending', case=False)).sum()),
         total_volume=('jobstatusdesc', 'count')
     ).reset_index()
 
-    # 4. STRATEGIC METRICS
     nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
-    avg_vol = nexus['total_volume'].mean()
-    nexus['impact_weight'] = (nexus['total_volume'] / avg_vol).round(2)
     
-    # 5. RECOMMENDATION ENGINE
-    def get_action(row):
-        if row['vitality_index'] < 70 and row['impact_weight'] > 1.5:
-            return "URGENT INTERVENTION: High admin friction in critical economic hub."
-        elif row['vitality_index'] > 90 and row['impact_weight'] > 2.0:
-            return "STRATEGIC ASSET: High-performing anchor sector."
-        else:
-            return "STABLE: Standard maintenance of operations."
+    # SAVE FIX: Create directory and save using absolute path logic
+    output_dir = 'data'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    file_path = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
+    nexus.to_csv(file_path, index=False)
+    
+    # Double check if file exists for the logs
+    if os.path.exists(file_path):
+        print(f"SUCCESS: File created at {file_path}")
+    else:
+        print("ERROR: File was not created.")
+        sys.exit(1)
 
-    nexus['strategic_action'] = nexus.apply
+if __name__ == "__main__":
+    run_pipeline()
