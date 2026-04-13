@@ -76,9 +76,10 @@ def run_pipeline():
     df['comdistnm'] = df['comdistnm'].fillna('Unknown')
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
     
-    # Calculate Growth (Velocity)
-    df['first_iss_dt'] = pd.to_datetime(df['first_iss_dt'], errors='coerce')
+   # Calculate Growth (Velocity) - Updated to use cleaned column name
+    df['firstissdt'] = pd.to_datetime(df['firstissdt'], errors='coerce')
     one_year_ago = datetime.now() - timedelta(days=365)
+    df['is_growth'] = (df['firstissdt'] >= one_year_ago).astype(int)
     df['is_growth'] = (df['first_iss_dt'] >= one_year_ago).astype(int)
 
     # 4. KPI CALCULATIONS (Tri-Factor)
