@@ -44,19 +44,17 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_pipeline():
-    # 1. SMART EXTRACTION: Use the Master License ID and filter at source
-    # This ID represents the primary City of Calgary Business License view
     dataset_id = "vdjc-pybd" 
     url = f"https://data.calgary.ca/resource/{dataset_id}.json"
     
-    # Optimization: Only pull necessary columns and statuses to stay under rate limits
+    # FIXED: Using 'jobstatusdesc' instead of 'licencestatus'
+    # FIXED: Using Calgary's specific status values
     params = {
-        "$select": "comdistnm, licencestatus, licencetypes",
-        "$where": "licencestatus IN ('Issued', 'Cancelled', 'Expired')",
+        "$select": "comdistnm, jobstatusdesc, licencetypes",
+        "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
         "$limit": 100000
     }
     
-    # Security: Mask request as a standard browser to avoid 403 Forbidden errors
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
@@ -66,50 +64,38 @@ def run_pipeline():
         r = requests.get(url, params=params, headers=headers, timeout=60)
         r.raise_for_status()
         df = pd.DataFrame(r.json())
-        print("Data successfully retrieved.")
+        print(f"Data successfully retrieved: {len(df)} rows.")
     except Exception as e:
         print(f"CRITICAL EXTRACTION ERROR: {e}")
+        # Print the response body to debug the 400 error further if it persists
+        if 'r' in locals():
+            print(f"Response Body: {r.text}")
         sys.exit(1)
 
-    # 2. COLUMN ALIGNMENT
-    # Ensure column names are clean and findable
-    df.columns = [c.replace('_', '').lower() for c in df.columns]
-    
     # 3. ATOMIC TO AGGREGATE PROCESSING
-    df['industry_sector'] = df['licencetypes'].apply(get_industry_sector)
+    df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
 
-    # Group by Community and Sector to find the 'Intersection'
+    # Status Logic: "Active" vs "Churn-Risk"
+    # Calgary doesn't show historic 'Cancelled' in the current active view, 
+    # so we track 'Invoiced' and 'Pending' as potential churn/friction points.
     nexus = df.groupby(['comdistnm', 'industry_sector']).agg(
-        active_licenses=('licencestatus', lambda x: (x.str.contains('Issued', case=False)).sum()),
-        churn_events=('licencestatus', lambda x: (x.str.contains('Cancelled|Expired', case=False)).sum()),
-        total_volume=('licencestatus', 'count')
+        active_licenses=('jobstatusdesc', lambda x: (x.str.contains('Licensed', case=False)).sum()),
+        admin_friction=('jobstatusdesc', lambda x: (x.str.contains('Invoiced|Pending', case=False)).sum()),
+        total_volume=('jobstatusdesc', 'count')
     ).reset_index()
 
     # 4. STRATEGIC METRICS
-    nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
     nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
-    
-    # Impact Weighting: Scales the community sector relative to the city average
     avg_vol = nexus['total_volume'].mean()
     nexus['impact_weight'] = (nexus['total_volume'] / avg_vol).round(2)
     
-    # 5. RECOMMENDATION ENGINE (Prescriptive Action)
+    # 5. RECOMMENDATION ENGINE
     def get_action(row):
-        if row['churn_rate'] > 0.35 and row['impact_weight'] > 1.5:
-            return "URGENT INTERVENTION: High systemic risk in critical economic hub."
-        elif row['churn_rate'] > 0.35:
-            return "MONITOR: Elevated churn detected in localized cluster."
-        elif row['vitality_index'] > 85 and row['impact_weight'] > 2.0:
+        if row['vitality_index'] < 70 and row['impact_weight'] > 1.5:
+            return "URGENT INTERVENTION: High admin friction in critical economic hub."
+        elif row['vitality_index'] > 90 and row['impact_weight'] > 2.0:
             return "STRATEGIC ASSET: High-performing anchor sector."
         else:
             return "STABLE: Standard maintenance of operations."
 
-    nexus['strategic_action'] = nexus.apply(get_action, axis=1)
-    
-    # 6. PERSISTENCE
-    os.makedirs('data', exist_ok=True)
-    nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
-    print("Nexus Build Successful: data/calgary_strategy_kpis.csv ready.")
-
-if __name__ == "__main__":
-    run_pipeline()
+    nexus['strategic_action'] = nexus.apply
