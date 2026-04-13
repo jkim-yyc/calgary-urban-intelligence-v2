@@ -6,60 +6,76 @@ import json
 from datetime import datetime, timedelta
 
 def get_industry_sector(lt):
-    """Categorizes raw license types into strategic economic sectors."""
+    """Expanded 30-Category High-Resolution Mapping."""
     lt = str(lt).upper()
     mapping = {
-        'Food & Beverage': ['FOOD', 'RESTAURANT', 'DINING', 'CAFE', 'CATERING', 'BAKERY'],
-        'Retail - General': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'VARIETY'],
-        'Health & Wellness': ['HEALTH', 'MEDICAL', 'CLINIC', 'PHARMACY', 'DENTAL', 'VET'],
-        'Personal Services': ['BEAUTY', 'HAIR', 'SALON', 'BARBER', 'SPA', 'TATTOO', 'LAUNDRY'],
-        'Construction & Trades': ['CONTRACTOR', 'CONSTRUCTION', 'PLUMBING', 'ELECTRICAL', 'ROOFING'],
-        'Automotive Services': ['AUTO', 'VEHICLE', 'CAR WASH', 'MECHANIC', 'TIRE', 'GARAGE'],
-        'Professional Services': ['CONSULTING', 'ENGINEER', 'ARCHITECT', 'ACCOUNTANT', 'LEGAL'],
-        'Cannabis & Liquor': ['CANNABIS', 'LIQUOR', 'BREWERY', 'DISTILLERY', 'ALCOHOL'],
-        'Information Technology': ['SOFTWARE', 'COMPUTER', 'IT SERVICES', 'TECHNOLOGY']
+        # TECH & INTELLIGENCE
+        'Software & SaaS': ['SOFTWARE', 'SAAS', 'DEVELOPMENT'],
+        'Data & AI Services': ['DATA', 'ANALYTICS', 'INTELLIGENCE', 'AI'],
+        'Cybersecurity': ['SECURITY', 'CYBER'],
+        'Hardware & Robotics': ['HARDWARE', 'ROBOTICS', 'ELECTRONIC'],
+        # FOOD & BEVERAGE
+        'Fine Dining': ['RESTAURANT', 'DINING'],
+        'Fast Casual': ['FAST FOOD', 'TAKE OUT'],
+        'Breweries & Distilleries': ['BREWERY', 'DISTILLERY', 'CRAFT BEER'],
+        'Cafes & Bakeries': ['CAFE', 'COFFEE', 'BAKERY'],
+        'Nightlife & Bars': ['BAR', 'NIGHTCLUB', 'LOUNGE'],
+        # MEDICAL & HEALTH
+        'Specialized Medicine': ['CLINIC', 'SPECIALIST', 'SURGERY'],
+        'Mental Health Services': ['PSYCHOLOGY', 'COUNSELLING', 'THERAPY'],
+        'Pharmaceuticals': ['PHARMACY', 'DRUG STORE'],
+        'Fitness & Gyms': ['FITNESS', 'GYM', 'YOGA', 'STUDIO'],
+        # TRADES & INDUSTRIAL
+        'Renewable Energy': ['SOLAR', 'WIND', 'RENEWABLE'],
+        'Oil & Gas Services': ['ENERGY', 'OIL', 'GAS', 'PETROLEUM'],
+        'Electrical Engineering': ['ELECTRICAL', 'ELECTRICIAN'],
+        'Civil Construction': ['CIVIL', 'INFRASTRUCTURE'],
+        'Residential Trades': ['PLUMBING', 'ROOFING', 'HEATING'],
+        # RETAIL
+        'Luxury Goods': ['JEWELLERY', 'BOUTIQUE', 'LUXURY'],
+        'Automotive Sales': ['DEALERSHIP', 'CAR SALES'],
+        'E-commerce Logistics': ['DELIVERY', 'COURIER', 'LOGISTICS'],
+        'General Merchandise': ['RETAIL', 'STORE', 'SHOP'],
+        # PROFESSIONAL SERVICES
+        'Legal Services': ['LEGAL', 'LAWYER', 'ATTORNEY'],
+        'Accounting & Tax': ['ACCOUNTANT', 'TAX', 'BOOKKEEPING'],
+        'Real Estate Services': ['REAL ESTATE', 'REALTOR', 'BROKERAGE'],
+        'Marketing & Media': ['MARKETING', 'ADVERTISING', 'DESIGN'],
+        # SPECIALIZED
+        'Cannabis Retail': ['CANNABIS', 'MARIJUANA'],
+        'Liquor Retail': ['LIQUOR', 'WINE', 'SPIRITS'],
+        'Education & Training': ['SCHOOL', 'TUTOR', 'TRAINING'],
+        'Personal Grooming': ['HAIR', 'SALON', 'BARBER', 'SPA']
     }
     for sector, keywords in mapping.items():
         if any(kw in lt for kw in keywords):
             return sector
-    return 'Other/Diversified'
+    return 'Diversified/Other'
 
 def get_action(row):
-    """Tri-Factor Risk Model: Prioritizes based on Impact, Vitality, and Velocity."""
+    """Refined Tri-Factor Risk Model for Balanced Distribution."""
     weight = row['impact_weight']
     vitality = row['vitality_index']
     growth = row['recent_growth_count']
     
-    # URGENT: High Impact + High Friction OR High Impact + Explosive Growth causing Friction
-    if (weight > 1.5 and vitality < 0.80) or (weight > 1.2 and growth > 20 and vitality < 0.85):
+    # URGENT: High Impact (>2.0) + Critical Vitality (<0.70)
+    if (weight > 2.0 and vitality < 0.70):
         return "URGENT INTERVENTION"
-    # MONITOR: High growth hotspots or moderate impact areas with dipping health
-    elif growth > 15 or vitality < 0.90 or weight > 1.0:
+    # MONITOR: Moderate friction or high-velocity growth hotspots
+    elif (weight > 1.2 and vitality < 0.85) or (growth > 25 and vitality < 0.90):
         return "MONITOR FRICTION"
-    # STABLE: High vitality and manageable growth
+    # STABLE: Default high-performance state
     else:
         return "STABLE OPERATIONS"
 
 def run_pipeline():
     output_dir = 'data'
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    if not os.path.exists(output_dir): os.makedirs(output_dir)
 
-    headers = {'User-Agent': 'Nexus-Strategy-Engine/1.0'}
-
-    # 1. DOWNLOAD SPATIAL DATA
-    spatial_url = "https://data.calgary.ca/resource/surr-xmvs.geojson"
-    try:
-        resp_geo = requests.get(spatial_url, headers=headers, timeout=60)
-        with open(os.path.join(output_dir, 'calgary_boundaries.geojson'), 'w') as f:
-            json.dump(resp_geo.json(), f)
-    except Exception as e:
-        print(f"Spatial Error: {e}")
-
-    # 2. DOWNLOAD LICENSE DATA
+    headers = {'User-Agent': 'Nexus-Stark-Engine/2.0'}
     url = "https://data.calgary.ca/resource/vdjc-pybd.json"
     params = {
-        "$select": "comdistnm, jobstatusdesc, licencetypes, tradename, address, first_iss_dt",
+        "$select": "comdistnm, jobstatusdesc, licencetypes, tradename, first_iss_dt",
         "$where": "jobstatusdesc IN ('Licensed', 'Pending Renewal', 'Renewal Invoiced', 'Renewal Licensed')",
         "$limit": 100000
     }
@@ -67,44 +83,38 @@ def run_pipeline():
     try:
         r = requests.get(url, params=params, headers=headers, timeout=60)
         df = pd.DataFrame(r.json())
+        # Standardize column names
+        df.columns = [c.replace('_', '').lower() for c in df.columns]
     except Exception as e:
-        print(f"Extraction Error: {e}")
-        sys.exit(1)
+        print(f"Error: {e}"); sys.exit(1)
 
-    # 3. CORE TRANSFORMATIONS
-    # Standardize column names (remove underscores and lowercase)
-    df.columns = [c.replace('_', '').lower() for c in df.columns]
+    # 1. Processing
     df['comdistnm'] = df['comdistnm'].fillna('Unknown')
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
     
-    # 4. TIMEZONE-AWARE GROWTH CALCULATION (Velocity)
-    # Convert and strip timezone to allow comparison with datetime.now()
+    # 2. Timezone-Naive Conversion for Velocity
     df['firstissdt'] = pd.to_datetime(df['firstissdt'], errors='coerce').dt.tz_localize(None)
     one_year_ago = datetime.now() - timedelta(days=365)
     df['is_growth'] = (df['firstissdt'] >= one_year_ago).astype(int)
 
-    # 5. KPI CALCULATIONS (Tri-Factor)
-    # Impact Weight (Relative to City Mean)
+    # 3. KPI Calculations
     comm_stats = df.groupby('comdistnm').size().rename('community_volume')
     df = df.merge(comm_stats, on='comdistnm', how='left')
-    city_avg = comm_stats.mean()
-    df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
+    df['impact_weight'] = (df['community_volume'] / comm_stats.mean()).round(2)
 
-    # Vitality Index (Licensed Rate)
     df['is_licensed'] = df['jobstatusdesc'].apply(lambda x: 1 if x == 'Licensed' else 0)
     vitality = df.groupby('comdistnm')['is_licensed'].mean().round(2).rename('vitality_index')
     df = df.merge(vitality, on='comdistnm', how='left')
 
-    # Sector Velocity (Total growth count available per row)
     sector_growth = df.groupby('industry_sector')['is_growth'].sum().rename('recent_growth_count')
     df = df.merge(sector_growth, on='industry_sector', how='left')
 
-    # 6. STRATEGIC ACTION (Decision Logic)
+    # 4. Action Logic
     df['strategic_action'] = df.apply(get_action, axis=1)
 
-    # 7. EXPORT
-    df.to_csv(os.path.join(output_dir, 'calgary_strategy_kpis.csv'), index=False, quoting=1)
-    print("Strategy Update Success: Data Synced to /data.")
+    # 5. Export
+    df.to_csv(os.path.join(output_dir, 'calgary_strategy_kpis.csv'), index=False)
+    print("Intelligence Sync Complete.")
 
 if __name__ == "__main__":
     run_pipeline()
