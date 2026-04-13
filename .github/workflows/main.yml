@@ -2,24 +2,25 @@ name: Nexus_Update
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0' # Every Sunday at Midnight
+    - cron: '0 0 * * 0'
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: checkout@v4
+      - uses: setup-python@v4
         with:
           python-version: '3.9'
       - run: pip install pandas requests
-      - name: Run Intelligence Engine
+      - name: Run Strategy Engine
         run: python script/main.py
-      - name: Deploy to Data Hub
+      - name: Commit and Push
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "actions@github.com"
           git add data/calgary_strategy_kpis.csv
-          git commit -m "Strategic Intelligence Update: $(date +'%Y-%m-%d')" || exit 0
+          git commit -m "Strategic Pulse Update: $(date +'%Y-%m-%d')" || exit 0
           git push
