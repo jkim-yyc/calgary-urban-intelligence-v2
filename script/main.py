@@ -44,33 +44,36 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_nexus_pipeline():
-    print("--- Starting Nexus Pipeline ---")
+    print("--- Nexus Pipeline: Initializing ---")
     try:
-        # Step 1: Fetch Data
+        # Step 1: Data Acquisition
         response = requests.get(API_URL, params={"$limit": 50000})
         df = pd.DataFrame(response.json())
-        print(f"Check 1: Received {len(df)} rows from API.")
-
-        # Step 2: Clean Columns
-        df.columns = [c.replace('_', '').lower() for c in df.columns]
         
-        # Identify the community name column (it varies in Calgary's API)
-        col_map = {'comdistnm': 'community', 'communityname': 'community', 'community_name': 'community'}
-        for old_col, new_col in col_map.items():
-            if old_col in df.columns:
-                df.rename(columns={old_col: new_col}, inplace=True)
-        
-        if 'community' not in df.columns:
-            print(f"Error: Could not find community column. Found: {df.columns.tolist()}")
+        if df.empty:
+            print("ERROR: API returned an empty dataset.")
             return
 
-        # Step 3: Map Sectors
-        print("Check 2: Mapping industry sectors...")
+        # Step 2: Clean and Normalize Columns
+        df.columns = [c.replace('_', '').lower() for c in df.columns]
+        
+        # Determine the geographic column (Calgary API uses various names)
+        geo_cols = ['comdistnm', 'communityname', 'community_name']
+        found_geo = next((c for c in geo_cols if c in df.columns), None)
+        
+        if not found_geo:
+            print(f"ERROR: No community column found. Available: {df.columns.tolist()}")
+            return
+        
+        df.rename(columns={found_geo: 'community_district'}, inplace=True)
+
+        # Step 3: Apply Industry Mapping
+        # Handle missing 'licencetypes' by filling with 'UNKNOWN'
+        df['licencetypes'] = df.get('licencetypes', 'UNKNOWN').fillna('UNKNOWN')
         df['industry_sector'] = df['licencetypes'].apply(get_industry_sector)
 
-        # Step 4: Aggregate
-        print("Check 3: Calculating KPIs...")
-        nexus_data = df.groupby(['community', 'industry_sector']).agg(
+        # Step 4: Strategic Aggregation
+        nexus_data = df.groupby(['community_district', 'industry_sector']).agg(
             active_licenses=('licencestatus', lambda x: (x == 'Issued').sum()),
             churn_events=('licencestatus', lambda x: x.isin(['Cancelled', 'Expired']).sum()),
             total_volume=('licencestatus', 'count')
@@ -78,18 +81,21 @@ def run_nexus_pipeline():
 
         nexus_data['churn_rate'] = (nexus_data['churn_events'] / nexus_data['total_volume']).fillna(0)
         
-        # Step 5: Save
-        os.makedirs('data', exist_ok=True)
-        file_path = 'data/calgary_strategy_kpis.csv'
+        # Step 5: Save Output
+        # Use a path relative to the repo root
+        output_dir = 'data'
+        os.makedirs(output_dir, exist_ok=True)
+        file_path = os.path.join(output_dir, 'calgary_strategy_kpis.csv')
+        
         nexus_data.to_csv(file_path, index=False)
         
         if os.path.exists(file_path):
-            print(f"Check 4: SUCCESS. File saved to {file_path}")
+            print(f"SUCCESS: Intelligence Nexus file saved at {file_path}")
         else:
-            print("Check 4: FAILED to save file.")
+            print("ERROR: File was not successfully written to disk.")
 
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}")
+        print(f"CRITICAL SYSTEM ERROR: {str(e)}")
 
 if __name__ == "__main__":
     run_nexus_pipeline()
