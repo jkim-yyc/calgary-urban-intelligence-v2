@@ -1,28 +1,32 @@
 name: Nexus_Update
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * 0'
-  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Dependencies
+      - name: Install
         run: pip install pandas requests
-      - name: Run Script
+      - name: Run
         run: python script/main.py
-      - name: Commit Data
+      - name: Push
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "actions@github.com"
-          git add data/calgary_strategy_kpis.csv
-          git commit -m "Strategic Update" || exit 0
-          git push
+          if [ -f data/calgary_strategy_kpis.csv ]; then
+            git add data/calgary_strategy_kpis.csv
+            git commit -m "Strategic Update" || exit 0
+            git push
+          else
+            echo "File not found. Skipping push."
+            exit 1
+          fi
