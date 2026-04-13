@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import os
+import sys
 
 def get_industry_sector(lt):
     lt = str(lt).upper()
@@ -42,43 +43,55 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def run_pipeline():
-    # Updated Dataset ID for Calgary Business Licenses
-    url = "https://data.calgary.ca/resource/864q-7v6g.json"
-    
-    r = requests.get(url, params={"$limit": 50000})
-    r.raise_for_status()
-    df = pd.DataFrame(r.json())
-    
-    # Normalize headers
+    # Attempting to reach the most stable Business License endpoints
+    endpoints = ["g5zp-p86c", "864q-7v6g"]
+    df = None
+
+    for eid in endpoints:
+        try:
+            url = f"https://data.calgary.ca/resource/{eid}.json"
+            r = requests.get(url, params={"$limit": 100000}, timeout=30)
+            if r.status_code == 200:
+                df = pd.DataFrame(r.json())
+                print(f"Extraction Successful from {eid}")
+                break
+        except Exception:
+            continue
+
+    if df is None or df.empty:
+        print("CRITICAL: Data extraction failed.")
+        sys.exit(1)
+
+    # Normalize Headers
     df.columns = [c.replace('_', '').lower() for c in df.columns]
     
-    # Dynamic column identification to prevent KeyErrors
-    comm_col = next((c for c in df.columns if 'comm' in c), 'comdistnm')
-    status_col = next((c for c in df.columns if 'status' in c), 'licencestatus')
-    type_col = next((c for c in df.columns if 'type' in c), 'licencetypes')
+    # Dynamic Column Discovery
+    comm_col = next((c for c in df.columns if 'comm' in c or 'dist' in c), None)
+    status_col = next((c for c in df.columns if 'status' in c), None)
+    type_col = next((c for c in df.columns if 'type' in c or 'tid' in c), None)
 
-    # Atomic record mapping
-    df['industry_sector'] = df[type_col].apply(get_industry_sector)
+    # Apply Sector Mapping (Atomic Level)
+    df['industry_sector'] = df[type_col].fillna('UNKNOWN').apply(get_industry_sector)
 
-    # Community + Sector Aggregation
+    # Strategic Aggregation (Collapse to Community + Sector)
     nexus = df.groupby([comm_col, 'industry_sector']).agg(
         active_licenses=(status_col, lambda x: (x.astype(str).str.contains('Issued', case=False)).sum()),
         churn_events=(status_col, lambda x: (x.astype(str).str.contains('Cancelled|Expired', case=False)).sum()),
         total_volume=(status_col, 'count')
     ).reset_index()
 
-    # Community KPI Calculation
+    # KPI Math
     nexus['churn_rate'] = (nexus['churn_events'] / nexus['total_volume']).fillna(0)
     nexus['vitality_index'] = ((nexus['active_licenses'] / nexus['total_volume']) * 100).round(2)
     
-    # Impact Weighting
+    # Impact Weighting (Is this a major hub?)
     avg_vol = nexus['total_volume'].mean()
     nexus['impact_weight'] = (nexus['total_volume'] / avg_vol).round(2)
     
-    # Prescriptive Strategic Action
+    # Prescriptive Action Logic
     def get_action(row):
         if row['churn_rate'] > 0.35 and row['impact_weight'] > 1.5:
-            return "URGENT INTERVENTION: Systemic risk in critical economic hub."
+            return "URGENT INTERVENTION: High systemic risk in critical economic hub."
         elif row['churn_rate'] > 0.35:
             return "MONITOR: Elevated churn in localized cluster."
         elif row['vitality_index'] > 85 and row['impact_weight'] > 2.0:
@@ -88,9 +101,10 @@ def run_pipeline():
 
     nexus['strategic_action'] = nexus.apply(get_action, axis=1)
     
+    # Save Production File
     os.makedirs('data', exist_ok=True)
     nexus.to_csv('data/calgary_strategy_kpis.csv', index=False)
-    print("Nexus Strategic Update Complete.")
+    print("Nexus Pipeline Success.")
 
 if __name__ == "__main__":
     run_pipeline()
