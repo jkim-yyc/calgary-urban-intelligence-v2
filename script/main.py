@@ -25,7 +25,7 @@ def get_industry_sector(lt):
     return 'Other/Diversified'
 
 def get_action(row):
-    """Tri-Factor Risk Model: Calculates priority based on Impact, Vitality, and Velocity."""
+    """Tri-Factor Risk Model: Prioritizes based on Impact, Vitality, and Velocity."""
     weight = row['impact_weight']
     vitality = row['vitality_index']
     growth = row['recent_growth_count']
@@ -72,36 +72,37 @@ def run_pipeline():
         sys.exit(1)
 
     # 3. CORE TRANSFORMATIONS
+    # Standardize column names (remove underscores and lowercase)
     df.columns = [c.replace('_', '').lower() for c in df.columns]
     df['comdistnm'] = df['comdistnm'].fillna('Unknown')
     df['industry_sector'] = df['licencetypes'].fillna('UNKNOWN').apply(get_industry_sector)
     
-   # Calculate Growth (Velocity) - Updated to use cleaned column name
-    df['firstissdt'] = pd.to_datetime(df['firstissdt'], errors='coerce')
+    # 4. TIMEZONE-AWARE GROWTH CALCULATION (Velocity)
+    # Convert and strip timezone to allow comparison with datetime.now()
+    df['firstissdt'] = pd.to_datetime(df['firstissdt'], errors='coerce').dt.tz_localize(None)
     one_year_ago = datetime.now() - timedelta(days=365)
     df['is_growth'] = (df['firstissdt'] >= one_year_ago).astype(int)
-    df['is_growth'] = (df['first_iss_dt'] >= one_year_ago).astype(int)
 
-    # 4. KPI CALCULATIONS (Tri-Factor)
-    # Impact Weight
+    # 5. KPI CALCULATIONS (Tri-Factor)
+    # Impact Weight (Relative to City Mean)
     comm_stats = df.groupby('comdistnm').size().rename('community_volume')
     df = df.merge(comm_stats, on='comdistnm', how='left')
     city_avg = comm_stats.mean()
     df['impact_weight'] = (df['community_volume'] / city_avg).round(2)
 
-    # Vitality Index
+    # Vitality Index (Licensed Rate)
     df['is_licensed'] = df['jobstatusdesc'].apply(lambda x: 1 if x == 'Licensed' else 0)
     vitality = df.groupby('comdistnm')['is_licensed'].mean().round(2).rename('vitality_index')
     df = df.merge(vitality, on='comdistnm', how='left')
 
-    # Sector Velocity (Growth Count per Sector)
+    # Sector Velocity (Total growth count available per row)
     sector_growth = df.groupby('industry_sector')['is_growth'].sum().rename('recent_growth_count')
     df = df.merge(sector_growth, on='industry_sector', how='left')
 
-    # 5. STRATEGIC ACTION (The Decision Logic)
+    # 6. STRATEGIC ACTION (Decision Logic)
     df['strategic_action'] = df.apply(get_action, axis=1)
 
-    # 6. EXPORT
+    # 7. EXPORT
     df.to_csv(os.path.join(output_dir, 'calgary_strategy_kpis.csv'), index=False, quoting=1)
     print("Strategy Update Success: Data Synced to /data.")
 
