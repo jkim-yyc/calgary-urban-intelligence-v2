@@ -15,6 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
       
+      # Use setup-python (no dash) and v5 for best compatibility
       - name: Initialize Python Environment
         uses: actions/setup-python@v5
         with:
