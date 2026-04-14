@@ -45,7 +45,7 @@ def calculate_nexus_metrics(df):
     df['innovation_acceleration'] = (df['growth_count'] / (city_avg_growth if city_avg_growth != 0 else 1)) * df['systemic_resilience']
     df['innovation_acceleration'] = df['innovation_acceleration'].clip(upper=2.0)
 
-    # Integrated Health Score (Weighted Quad-Factor)
+    # Integrated Health Score
     df['health_score'] = (
         (df['strategic_footprint'] * 0.2) + 
         (df['systemic_resilience'] * 0.3) + 
@@ -53,7 +53,7 @@ def calculate_nexus_metrics(df):
         (df['expansion_momentum'] * 0.2)
     )
 
-    # Optimized Strategic Action based on Health Score
+    # Strategic Action Directives
     def get_action(score):
         if score >= 0.75: return "NEURAL CORE"
         elif 0.50 <= score < 0.75: return "STABLE OPERATIONS"
@@ -64,18 +64,19 @@ def calculate_nexus_metrics(df):
     return df
 
 if __name__ == "__main__":
-    # Path logic relative to 'scripts/' folder
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    root_dir = os.path.abspath(os.path.join(script_dir, '..'))
+    # Current folder is 'script'
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.abspath(os.path.join(current_dir, '..'))
     
-    input_path = os.path.join(root_dir, 'data', 'calgary_strategy_kpis.csv')
-    output_path = os.path.join(root_dir, 'data', 'nexus_intelligence_feed.csv')
+    # Looking into 'data' folder
+    input_file = os.path.join(root_dir, 'data', 'calgary_strategy_kpis.csv')
+    output_file = os.path.join(root_dir, 'data', 'nexus_intelligence_feed.csv')
 
-    if os.path.exists(input_path):
-        raw_df = pd.read_csv(input_path)
+    if os.path.exists(input_file):
+        raw_df = pd.read_csv(input_file)
         processed_df = calculate_nexus_metrics(raw_df)
-        processed_df.to_csv(output_path, index=False)
-        print(f"Success. Intelligence Feed saved to: {output_path}")
+        processed_df.to_csv(output_file, index=False)
+        print(f"Success. Intelligence Feed saved to: {output_file}")
     else:
-        print(f"CRITICAL ERROR: Input file not found at {input_path}")
+        print(f"CRITICAL ERROR: Input file not found at {input_file}")
         exit(1)
