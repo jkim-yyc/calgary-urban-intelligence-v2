@@ -2,10 +2,10 @@ name: Calgary Strategic Intelligence Nexus - Neural Feed
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs daily at midnight
+    - cron: '0 0 * * *'
   push:
     branches: [ main ]
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   build_intelligence:
@@ -26,12 +26,14 @@ jobs:
         pip install pandas numpy
 
     - name: Execute Strategic Intelligence Pipeline
-      run: python main.py
+      # Pointing to the script folder
+      run: python script/main.py
 
     - name: Commit Updated Intelligence Feed
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
+        # Adding the generated file from the root
         git add nexus_intelligence_feed.csv
         git commit -m "Neural Feed Update: $(date +'%Y-%m-%d')" || echo "No changes to commit"
         git push
