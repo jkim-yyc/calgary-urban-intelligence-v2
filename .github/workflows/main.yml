@@ -1,0 +1,35 @@
+name: Calgary Strategic Intelligence Nexus - Neural Feed
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build_intelligence:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy
+
+    - name: Execute Strategic Intelligence Pipeline
+      run: python script/main.py
+
+    - name: Commit Intelligence Feed
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/nexus_intelligence_feed.csv
+        git commit -m "Neural Feed Update: $(date +'%Y-%m-%d')" || echo "No changes to commit"
+        git push
