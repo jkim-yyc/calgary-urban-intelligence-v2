@@ -4,34 +4,34 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * 1' # Runs every Monday at Midnight
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  nexus_update:
+  nexus_orchestration:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Compute Environment
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install Logic Dependencies
         run: pip install pandas requests
 
-      - name: Run Engine
+      - name: Execute Intelligence Engine
         run: python script/main.py
 
-      - name: Commit & Push
+      - name: Atomic Deploy to Data Branch
         run: |
-          git config user.name "Nexus Bot"
+          git config user.name "Nexus Orchestrator"
           git config user.email "actions@github.com"
           git add data/nexus_intelligence_feed.csv
-          git commit -m "Automated Nexus Feed Update" || exit 0
+          git commit -m "Update Intelligence Feed: $(date +'%Y-%m-%d')" || exit 0
           git push
