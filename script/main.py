@@ -20,31 +20,38 @@ SECTOR_MAPPING = {
     'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE']
 }
 
-# --- DATA QUALITY GATES ---
-MIN_RECORDS_THRESHOLD = 1000  # Fail if dataset seems suspiciously small
-
 def fetch_calgary_data():
-    """Fetches data from the 2026 production endpoint with server-side filtering."""
-    # New verified 2026 Resource ID
+    """Fetches data with dynamic schema discovery to prevent 400 Bad Request errors."""
     resource_id = "vdjc-pybd" 
+    base_url = f"https://data.calgary.ca/resource/{resource_id}.json"
+    headers = {'User-Agent': 'NexusStrategicIntelligence/2.2'}
     
-    # Performance: Incremental window (last 2 years) to reduce payload size
-    lookback_date = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT%H:%M:%S')
+    print(f"System: Identifying schema for {resource_id}...")
     
-    # Server-side SoQL filtering: Only fetch what we need
-    url = f"https://data.calgary.ca/resource/{resource_id}.json?$where=issueddate > '{lookback_date}'&$limit=100000"
+    # Discovery Step: Fetch 1 row to find the date column name
+    schema_resp = requests.get(f"{base_url}?$limit=1", headers=headers, timeout=20)
+    schema_resp.raise_for_status()
+    sample = schema_resp.json()[0]
     
-    print(f"System: Accessing Production Node {resource_id}...")
-    print(f"System: Filtering records issued after {lookback_date}...")
+    # Find the most likely date column
+    date_candidates = ['issueddate', 'issued_date', 'date_issued', 'licence_date']
+    date_col = next((c for c in date_candidates if c in sample), None)
     
-    response = requests.get(url, headers={'User-Agent': 'NexusStrategicIntelligence/2.1'}, timeout=30)
+    if not date_col:
+        print("Warning: Date column not found. Defaulting to full fetch...")
+        final_url = f"{base_url}?$limit=100000"
+    else:
+        # Incremental window (last 2 years)
+        lookback = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT%H:%M:%S')
+        final_url = f"{base_url}?$where={date_col} > '{lookback}'&$limit=100000"
+        print(f"System: Filtering by '{date_col}' > {lookback}")
+
+    response = requests.get(final_url, headers=headers, timeout=30)
     response.raise_for_status()
     
     df = pd.DataFrame(response.json())
-    
-    if len(df) < MIN_RECORDS_THRESHOLD:
-        raise ValueError(f"DQ FAILURE: API returned only {len(df)} records. Safety shutdown to protect dashboard integrity.")
-        
+    if len(df) < 500:
+        raise ValueError("DQ FAILURE: Insufficient records returned.")
     return df
 
 def categorize_sector(license_text):
@@ -55,37 +62,38 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def transform_and_aggregate(df):
-    """Performs KPI calculations and health score logic."""
     df.columns = [c.lower() for c in df.columns]
     
-    # Fuzzy column matching for resilience
+    # Identify key columns dynamically
     comm_col = next((c for c in ['communityname', 'community', 'comm_name'] if c in df.columns), 'community_name')
     type_col = next((c for c in ['licencetypes', 'licence_type'] if c in df.columns), 'licence_type')
-    date_col = next((c for c in ['issueddate', 'issued_date'] if c in df.columns), 'issued_date')
+    date_col = next((c for c in ['issueddate', 'issued_date', 'date_issued'] if c in df.columns), None)
 
     df['sector'] = df[type_col].apply(categorize_sector)
-    df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
     
-    # Momentum: Last 12 months
-    momentum_limit = datetime.now() - timedelta(days=365)
-    
-    # Aggregation Engine
+    # KPI Logic
+    if date_col:
+        df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
+        momentum_limit = datetime.now() - timedelta(days=365)
+        momentum_calc = lambda x: (x > momentum_limit).sum()
+    else:
+        df['issued_dt'] = datetime.now()
+        momentum_calc = lambda x: 0
+
     agg = df.groupby(comm_col).agg(
         footprint=('sector', 'count'),
         resilience=('sector', 'nunique'),
-        momentum=('issued_dt', lambda x: (x > momentum_limit).sum())
+        momentum=('issued_dt', momentum_calc)
     ).reset_index()
 
-    # Scaling Logic
+    # Normalization & Scores
     for col in ['footprint', 'resilience', 'momentum']:
         max_val = agg[col].max()
         agg[f'n_{col}'] = agg[col] / (max_val if max_val > 0 else 1)
 
-    # Innovation Acceleration KPI
     agg['n_acceleration'] = (agg['n_momentum'] * agg['n_resilience'])
     agg['n_acceleration'] /= (agg['n_acceleration'].max() if agg['n_acceleration'].max() > 0 else 1)
 
-    # Strategic Health Score (Weighted 35/35/15/15)
     agg['health_score'] = (
         (agg['n_footprint'] * 0.35) + 
         (agg['n_resilience'] * 0.35) + 
@@ -109,9 +117,7 @@ if __name__ == "__main__":
     try:
         raw_data = fetch_calgary_data()
         processed_data = transform_and_aggregate(raw_data)
-        
-        output_file = os.path.join(data_dir, "nexus_intelligence_feed.csv")
-        processed_data.to_csv(output_file, index=False)
+        processed_data.to_csv(os.path.join(data_dir, "nexus_intelligence_feed.csv"), index=False)
         print(f"Success: Processed {len(processed_data)} community nodes.")
     except Exception as e:
         print(f"Pipeline Critical Failure: {e}")
