@@ -2,34 +2,34 @@ name: Nexus Production Sync
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # Weekly Monday Refresh
+    - cron: '0 0 * * 1' # Runs Weekly (Monday)
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual run in Actions tab
 
 jobs:
   update_nexus:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
       
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-          # Cache removed to prevent "No file matched" error
 
       - name: Install Core Dependencies
         run: pip install pandas numpy requests
 
       - name: Execute Intelligence Pipeline
-        run: python main.py
+        run: python script/main.py # Path to your script folder
 
       - name: Deploy to GitHub Data Stream
         run: |
           git config --global user.name "Nexus-Bot"
           git config --global user.email "bot@nexus.ai"
-          mkdir -p data # Ensure directory exists before adding
+          mkdir -p data # Ensures data folder exists at root
           git add data/nexus_intelligence_feed.csv
-          git commit -m "Automated Production Refresh [skip ci]" || echo "Clean State"
+          git commit -m "Automated Production Refresh [skip ci]" || echo "No changes to commit"
           git push
