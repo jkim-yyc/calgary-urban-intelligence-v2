@@ -2,7 +2,7 @@ name: Nexus Production Sync
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # Weekly Monday Refresh
+    - cron: '0 0 * * 1'
   push:
     branches: [ main ]
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0 
 
-      - name: Setup Python 3.9
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
@@ -35,13 +35,11 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Force synchronization with remote to avoid push rejections
-          git fetch origin main
-          git reset --mixed origin main
-          
+          # 1. Add and commit the new data first
           mkdir -p data
           git add data/nexus_intelligence_feed.csv
+          git commit -m "Strategic Refresh: Level 2 Intelligence [skip ci]" || echo "No changes to commit"
           
-          # Commit only if changes exist, push with force to overwrite data conflicts
-          git commit -m "Strategic Refresh: Level 2 Intelligence [skip ci]" || echo "Clean State"
-          git push origin main --force
+          # 2. Push directly to the remote main branch using force
+          # This bypasses the 'ambiguous argument' issue by being explicit
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main --force
