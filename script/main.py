@@ -1,46 +1,51 @@
 import pandas as pd
 import os
 import requests
+from datetime import datetime
 
 def fetch_strategic_data():
-    """Fetches business license data using the most stable known endpoint."""
-    # Current active endpoint for Calgary Business Licenses
+    """Fetches Calgary Business License data using the current verified 2026 endpoint."""
+    # This is the current stable 'View' endpoint for Calgary Business Licenses
     url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
     
     print("System: Accessing Calgary Strategic Data Portal...")
-    response = requests.get(url)
-    
-    # If 404, try the secondary stable endpoint
-    if response.status_code == 404:
-        print("System: Primary endpoint moved. Redirecting to secondary...")
-        url = "https://data.calgary.ca/resource/g5zp-yj93.json?$limit=100000"
-        response = requests.get(url)
-        
-    response.raise_for_status()
-    return pd.DataFrame(response.json())
+    try:
+        response = requests.get(url, timeout=30)
+        # If the specific resource is 404, the portal has moved it to a new ID.
+        # We use the 'fmxu-7969' alias as the secondary production-grade fallback.
+        if response.status_code == 404:
+            print("System: Primary endpoint moved. Switching to secondary production-node...")
+            url = "https://data.calgary.ca/resource/fmxu-7969.json?$limit=100000"
+            response = requests.get(url, timeout=30)
+            
+        response.raise_for_status()
+        return pd.DataFrame(response.json())
+    except Exception as e:
+        print(f"System: Strategic Data Access Denied. Reason: {e}")
+        raise
 
 def categorize_sector(license_text):
     """STRICT LOGIC: Aggregates 'licencetypes' into ~20 strategic sectors."""
     text = str(license_text).upper()
     mappings = {
-        'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'PETROLEUM'],
-        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL'],
-        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC'],
-        'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES'],
-        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE'],
-        'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT'],
-        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER'],
-        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL'],
-        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY'],
-        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC'],
-        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE'],
-        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL'],
-        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR'],
-        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY'],
-        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS'],
-        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH'],
-        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE'],
-        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM'],
+        'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'PETROLEUM', 'SOLAR', 'WIND'],
+        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL', 'BREWERY'],
+        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC', 'ROOFING'],
+        'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES', 'MERCHANDISE'],
+        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE', 'BROKER'],
+        'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT', 'ADVISOR'],
+        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER', 'CYBER', 'DIGITAL'],
+        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL', 'PHARMACY'],
+        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY', 'AESTHETIC'],
+        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC', 'FREIGHT', 'COURIER'],
+        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE', 'FABRICATION'],
+        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL', 'LANDLORD'],
+        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR', 'COLLEGE'],
+        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY', 'NON-PROFIT'],
+        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS', 'SPORTS'],
+        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE', 'MECHANIC'],
+        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE', 'RECYCLE'],
+        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM', 'ADVERT'],
         'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE'],
         'Cannabis & Tobacco': ['CANNABIS', 'TOBACCO', 'VAPE']
     }
@@ -50,30 +55,32 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def process_nexus_feed(df):
-    """Generates weighted KPIs and Health Scores."""
-    # Standardize column names
+    """Generates weighted KPIs and Health Scores for Community-level mapping."""
     df.columns = [c.lower() for c in df.columns]
     
-    # Ensure necessary columns exist
-    required = ['communityname', 'licencetypes', 'issueddate']
-    df = df.dropna(subset=[col for col in required if col in df.columns])
+    # Ensure vital columns exist or fill with defaults
+    if 'communityname' not in df.columns:
+        df['communityname'] = 'UNASSIGNED'
     
     df['sector'] = df['licencetypes'].apply(categorize_sector)
     df['issueddate'] = pd.to_datetime(df['issueddate'], errors='coerce')
     
-    # Community Aggregation
+    # Momentum Window: Activity since Jan 1, 2025
+    momentum_cutoff = datetime(2025, 1, 1)
+    
+    # Community-Level Aggregation
     agg = df.groupby('communityname').agg(
         footprint=('licencetypes', 'count'),
         resilience=('sector', 'nunique'),
-        momentum=('issueddate', lambda x: (x > '2025-01-01').sum())
+        momentum=('issueddate', lambda x: (x > momentum_cutoff).sum())
     ).reset_index()
 
-    # Normalization
+    # Normalization (0.0 to 1.0)
     for col in ['footprint', 'resilience', 'momentum']:
         max_val = agg[col].max()
         agg[f'n_{col}'] = agg[col] / (max_val if max_val > 0 else 1)
 
-    # Innovation Acceleration
+    # Derived KPI: Innovation Acceleration
     agg['n_acceleration'] = (agg['n_momentum'] * agg['n_resilience'])
     acc_max = agg['n_acceleration'].max()
     agg['n_acceleration'] /= (acc_max if acc_max > 0 else 1)
@@ -86,6 +93,7 @@ def process_nexus_feed(df):
         (agg['n_acceleration'] * 0.15)
     )
 
+    # Strategic Action Labels
     agg['strategic_action'] = pd.cut(
         agg['health_score'], 
         bins=[0, 0.25, 0.50, 0.75, 1.05], 
@@ -104,7 +112,7 @@ if __name__ == "__main__":
         raw_df = fetch_strategic_data()
         final_df = process_nexus_feed(raw_df)
         final_df.to_csv(os.path.join(output_dir, "nexus_intelligence_feed.csv"), index=False)
-        print("Success: Nexus Intelligence Feed updated.")
+        print("Success: Nexus Intelligence Feed generated.")
     except Exception as e:
         print(f"Pipeline Error: {e}")
         exit(1)
