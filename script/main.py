@@ -21,37 +21,33 @@ SECTOR_MAPPING = {
 }
 
 def fetch_calgary_data():
-    """Fetches data with dynamic schema discovery to prevent 400 Bad Request errors."""
+    """Fetches data using verified 2026 production column names."""
     resource_id = "vdjc-pybd" 
     base_url = f"https://data.calgary.ca/resource/{resource_id}.json"
-    headers = {'User-Agent': 'NexusStrategicIntelligence/2.2'}
+    headers = {'User-Agent': 'NexusStrategicIntelligence/2.3'}
     
-    print(f"System: Identifying schema for {resource_id}...")
+    # Verified 2026 Schema Fields
+    # comdistnm = Community District Name
+    # first_iss_dt = First Issued Date
+    # licencetypes = Licence Type
     
-    # Discovery Step: Fetch 1 row to find the date column name
-    schema_resp = requests.get(f"{base_url}?$limit=1", headers=headers, timeout=20)
-    schema_resp.raise_for_status()
-    sample = schema_resp.json()[0]
+    # Filter for the last 2 years to ensure performance
+    lookback = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT%H:%M:%S')
     
-    # Find the most likely date column
-    date_candidates = ['issueddate', 'issued_date', 'date_issued', 'licence_date']
-    date_col = next((c for c in date_candidates if c in sample), None)
+    # We use 'first_iss_dt' for the SoQL filter
+    final_url = f"{base_url}?$where=first_iss_dt > '{lookback}'&$limit=100000"
     
-    if not date_col:
-        print("Warning: Date column not found. Defaulting to full fetch...")
-        final_url = f"{base_url}?$limit=100000"
-    else:
-        # Incremental window (last 2 years)
-        lookback = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT%H:%M:%S')
-        final_url = f"{base_url}?$where={date_col} > '{lookback}'&$limit=100000"
-        print(f"System: Filtering by '{date_col}' > {lookback}")
+    print(f"System: Accessing Production Node {resource_id}...")
+    print(f"System: Filtering by 'first_iss_dt' > {lookback}")
 
     response = requests.get(final_url, headers=headers, timeout=30)
     response.raise_for_status()
     
     df = pd.DataFrame(response.json())
-    if len(df) < 500:
-        raise ValueError("DQ FAILURE: Insufficient records returned.")
+    
+    if df.empty:
+        raise ValueError("DQ FAILURE: API returned an empty dataset for the selected period.")
+    
     return df
 
 def categorize_sector(license_text):
@@ -62,38 +58,43 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def transform_and_aggregate(df):
+    """Aggregates data using verified Calgary API field names."""
+    # Convert all columns to lowercase for consistent internal handling
     df.columns = [c.lower() for c in df.columns]
     
-    # Identify key columns dynamically
-    comm_col = next((c for c in ['communityname', 'community', 'comm_name'] if c in df.columns), 'community_name')
-    type_col = next((c for c in ['licencetypes', 'licence_type'] if c in df.columns), 'licence_type')
-    date_col = next((c for c in ['issueddate', 'issued_date', 'date_issued'] if c in df.columns), None)
+    # 2026 Field Mapping
+    comm_col = 'comdistnm'    # Community Name
+    type_col = 'licencetypes' # License Types
+    date_col = 'first_iss_dt'  # Issue Date
+    
+    if comm_col not in df.columns or type_col not in df.columns:
+        available = df.columns.tolist()
+        raise KeyError(f"Schema mismatch. Expected '{comm_col}', found: {available}")
 
     df['sector'] = df[type_col].apply(categorize_sector)
+    df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
     
-    # KPI Logic
-    if date_col:
-        df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
-        momentum_limit = datetime.now() - timedelta(days=365)
-        momentum_calc = lambda x: (x > momentum_limit).sum()
-    else:
-        df['issued_dt'] = datetime.now()
-        momentum_calc = lambda x: 0
-
+    # Momentum: Activity in the last 12 months
+    momentum_limit = datetime.now() - timedelta(days=365)
+    
+    # Aggregation logic
     agg = df.groupby(comm_col).agg(
         footprint=('sector', 'count'),
         resilience=('sector', 'nunique'),
-        momentum=('issued_dt', momentum_calc)
+        momentum=('issued_dt', lambda x: (x > momentum_limit).sum())
     ).reset_index()
 
-    # Normalization & Scores
+    # Normalization (0 to 1)
     for col in ['footprint', 'resilience', 'momentum']:
         max_val = agg[col].max()
         agg[f'n_{col}'] = agg[col] / (max_val if max_val > 0 else 1)
 
+    # Innovation Acceleration KPI
     agg['n_acceleration'] = (agg['n_momentum'] * agg['n_resilience'])
-    agg['n_acceleration'] /= (agg['n_acceleration'].max() if agg['n_acceleration'].max() > 0 else 1)
+    acc_max = agg['n_acceleration'].max()
+    agg['n_acceleration'] /= (acc_max if acc_max > 0 else 1)
 
+    # Weighted Strategic Health Score
     agg['health_score'] = (
         (agg['n_footprint'] * 0.35) + 
         (agg['n_resilience'] * 0.35) + 
@@ -101,6 +102,7 @@ def transform_and_aggregate(df):
         (agg['n_acceleration'] * 0.15)
     )
 
+    # Directives
     agg['strategic_action'] = pd.cut(
         agg['health_score'], 
         bins=[0, 0.25, 0.50, 0.75, 1.05], 
@@ -108,16 +110,20 @@ def transform_and_aggregate(df):
         include_lowest=True
     )
     
+    # Return with a clean user-friendly community column name
     return agg.rename(columns={comm_col: 'community_name'})
 
 if __name__ == "__main__":
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_path, "..", "data")
     os.makedirs(data_dir, exist_ok=True)
     
     try:
         raw_data = fetch_calgary_data()
         processed_data = transform_and_aggregate(raw_data)
-        processed_data.to_csv(os.path.join(data_dir, "nexus_intelligence_feed.csv"), index=False)
+        
+        output_path = os.path.join(data_dir, "nexus_intelligence_feed.csv")
+        processed_data.to_csv(output_path, index=False)
         print(f"Success: Processed {len(processed_data)} community nodes.")
     except Exception as e:
         print(f"Pipeline Critical Failure: {e}")
