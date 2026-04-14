@@ -1,46 +1,30 @@
-name: Nexus Intelligence Pipeline
+name: Nexus Intelligence Sync
 
 on:
+  schedule:
+    - cron: '0 9 * * 1' # Runs every Monday at 9 AM
   push:
     branches: [ main ]
-  schedule:
-    - cron: '0 0 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  update_intelligence:
+  run-pipeline:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          fetch-depth: 0 # Essential for rebasing
-
-      - name: Setup Environment
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Logic
-        run: pip install pandas requests
-
-      - name: Run Intelligence Engine
-        run: python script/main.py
-
-      - name: Sync and Deploy Data
+          python-version: '3.9'
+          cache: 'pip'
+      - name: Dependencies
+        run: pip install pandas numpy requests
+      - name: Execute
+        run: python main.py
+      - name: Commit
         run: |
-          git config user.name "Nexus Bot"
-          git config user.email "actions@github.com"
+          git config --global user.name "Nexus-Bot"
+          git config --global user.email "bot@nexus.ai"
           git add data/nexus_intelligence_feed.csv
-          
-          # Only commit if changes exist
-          git diff --quiet && git diff --staged --quiet || git commit -m "Automated Refresh: $(date +'%Y-%m-%d')"
-          
-          # Rebase ensures our new data sits on top of any remote changes
-          git pull --rebase origin main
-          
-          # Final push
-          git push origin main
+          git commit -m "Strategic Refresh [skip ci]" || echo "No changes"
+          git push
