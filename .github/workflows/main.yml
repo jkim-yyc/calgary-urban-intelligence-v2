@@ -33,5 +33,5 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add nexus_intelligence_feed.csv
-        git commit -m "Keyword-Based Sector Mapping Update: $(date +'%Y-%m-%d')" || echo "No changes"
+        git commit -m "Neural Feed Update: $(date +'%Y-%m-%d')" || echo "No changes to commit"
         git push
