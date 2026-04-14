@@ -30,6 +30,7 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
+        # The script creates the 'data' folder, so we add it here
         git add data/nexus_intelligence_feed.csv
         git commit -m "Neural Feed Update: $(date +'%Y-%m-%d')" || echo "No changes to commit"
         git push
