@@ -35,14 +35,17 @@ def calculate_nexus_metrics(df):
     col_name = 'licencetypes' if 'licencetypes' in df.columns else 'LICENCETYPES'
     df['industry_sector'] = df[col_name].apply(categorize_sector)
 
+    # KPI Normalization
     df['strategic_footprint'] = df['impact_weight'] / df['impact_weight'].max()
     df['systemic_resilience'] = df['vitality_index'] / df['vitality_index'].max()
     df['expansion_momentum'] = df['growth_count'] / df['growth_count'].max()
 
+    # Innovation Acceleration (Sector Velocity)
     city_avg_growth = df['growth_count'].mean()
     df['innovation_acceleration'] = (df['growth_count'] / (city_avg_growth if city_avg_growth != 0 else 1)) * df['systemic_resilience']
     df['innovation_acceleration'] = df['innovation_acceleration'].clip(upper=2.0)
 
+    # Integrated Health Score (Weighted Quad-Factor)
     df['health_score'] = (
         (df['strategic_footprint'] * 0.2) + 
         (df['systemic_resilience'] * 0.3) + 
@@ -50,6 +53,7 @@ def calculate_nexus_metrics(df):
         (df['expansion_momentum'] * 0.2)
     )
 
+    # Optimized Strategic Action based on Health Score
     def get_action(score):
         if score >= 0.75: return "NEURAL CORE"
         elif 0.50 <= score < 0.75: return "STABLE OPERATIONS"
@@ -60,22 +64,18 @@ def calculate_nexus_metrics(df):
     return df
 
 if __name__ == "__main__":
+    # Path logic relative to 'scripts/' folder
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.abspath(os.path.join(script_dir, '..'))
     
-    # Pathing to the 'data' folder
-    data_dir = os.path.join(root_dir, 'data')
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-
-    input_path = os.path.join(root_dir, 'calgary_business_data.csv')
-    output_path = os.path.join(data_dir, 'nexus_intelligence_feed.csv')
+    input_path = os.path.join(root_dir, 'data', 'calgary_strategy_kpis.csv')
+    output_path = os.path.join(root_dir, 'data', 'nexus_intelligence_feed.csv')
 
     if os.path.exists(input_path):
         raw_df = pd.read_csv(input_path)
         processed_df = calculate_nexus_metrics(raw_df)
         processed_df.to_csv(output_path, index=False)
-        print(f"Process Complete. Intelligence Feed saved to: {output_path}")
+        print(f"Success. Intelligence Feed saved to: {output_path}")
     else:
         print(f"CRITICAL ERROR: Input file not found at {input_path}")
         exit(1)
