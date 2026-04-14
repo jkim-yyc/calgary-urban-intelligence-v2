@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # --- BUSINESS LOGIC CONFIG ---
 SECTOR_MAPPING = {
@@ -24,17 +24,11 @@ def fetch_calgary_data():
     """Fetches data using verified 2026 production column names."""
     resource_id = "vdjc-pybd" 
     base_url = f"https://data.calgary.ca/resource/{resource_id}.json"
-    headers = {'User-Agent': 'NexusStrategicIntelligence/2.3'}
+    headers = {'User-Agent': 'NexusStrategicIntelligence/2.4'}
     
-    # Verified 2026 Schema Fields
-    # comdistnm = Community District Name
-    # first_iss_dt = First Issued Date
-    # licencetypes = Licence Type
+    # Filter for the last 2 years (UTC Aware)
+    lookback = (datetime.now(timezone.utc) - timedelta(days=730)).strftime('%Y-%m-%dT%H:%M:%S')
     
-    # Filter for the last 2 years to ensure performance
-    lookback = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT%H:%M:%S')
-    
-    # We use 'first_iss_dt' for the SoQL filter
     final_url = f"{base_url}?$where=first_iss_dt > '{lookback}'&$limit=100000"
     
     print(f"System: Accessing Production Node {resource_id}...")
@@ -44,9 +38,8 @@ def fetch_calgary_data():
     response.raise_for_status()
     
     df = pd.DataFrame(response.json())
-    
     if df.empty:
-        raise ValueError("DQ FAILURE: API returned an empty dataset for the selected period.")
+        raise ValueError("DQ FAILURE: API returned empty dataset.")
     
     return df
 
@@ -58,43 +51,37 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def transform_and_aggregate(df):
-    """Aggregates data using verified Calgary API field names."""
-    # Convert all columns to lowercase for consistent internal handling
+    """Aggregates data with timezone-aware KPI calculations."""
     df.columns = [c.lower() for c in df.columns]
     
-    # 2026 Field Mapping
-    comm_col = 'comdistnm'    # Community Name
-    type_col = 'licencetypes' # License Types
-    date_col = 'first_iss_dt'  # Issue Date
-    
-    if comm_col not in df.columns or type_col not in df.columns:
-        available = df.columns.tolist()
-        raise KeyError(f"Schema mismatch. Expected '{comm_col}', found: {available}")
+    # Verified 2026 Mappings
+    comm_col = 'comdistnm'
+    type_col = 'licencetypes'
+    date_col = 'first_iss_dt'
 
     df['sector'] = df[type_col].apply(categorize_sector)
-    df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
     
-    # Momentum: Activity in the last 12 months
-    momentum_limit = datetime.now() - timedelta(days=365)
+    # Ensure datetime conversion handles UTC correctly
+    df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce', utc=True)
     
-    # Aggregation logic
+    # Momentum: Activity in the last 12 months (Timezone Aware)
+    momentum_limit = datetime.now(timezone.utc) - timedelta(days=365)
+    
     agg = df.groupby(comm_col).agg(
         footprint=('sector', 'count'),
         resilience=('sector', 'nunique'),
         momentum=('issued_dt', lambda x: (x > momentum_limit).sum())
     ).reset_index()
 
-    # Normalization (0 to 1)
+    # Normalization
     for col in ['footprint', 'resilience', 'momentum']:
         max_val = agg[col].max()
         agg[f'n_{col}'] = agg[col] / (max_val if max_val > 0 else 1)
 
-    # Innovation Acceleration KPI
     agg['n_acceleration'] = (agg['n_momentum'] * agg['n_resilience'])
-    acc_max = agg['n_acceleration'].max()
-    agg['n_acceleration'] /= (acc_max if acc_max > 0 else 1)
+    agg['n_acceleration'] /= (agg['n_acceleration'].max() if agg['n_acceleration'].max() > 0 else 1)
 
-    # Weighted Strategic Health Score
+    # Strategic Health Score
     agg['health_score'] = (
         (agg['n_footprint'] * 0.35) + 
         (agg['n_resilience'] * 0.35) + 
@@ -102,15 +89,14 @@ def transform_and_aggregate(df):
         (agg['n_acceleration'] * 0.15)
     )
 
-    # Directives
+    # Tightened 2026 Directives: Threshold raised to 0.30 for 'Urgent Intervention'
     agg['strategic_action'] = pd.cut(
         agg['health_score'], 
-        bins=[0, 0.25, 0.50, 0.75, 1.05], 
+        bins=[0, 0.30, 0.55, 0.80, 1.05], 
         labels=["URGENT INTERVENTION", "MONITOR FRICTION", "STABLE OPERATIONS", "NEURAL CORE"],
         include_lowest=True
     )
     
-    # Return with a clean user-friendly community column name
     return agg.rename(columns={comm_col: 'community_name'})
 
 if __name__ == "__main__":
@@ -121,9 +107,7 @@ if __name__ == "__main__":
     try:
         raw_data = fetch_calgary_data()
         processed_data = transform_and_aggregate(raw_data)
-        
-        output_path = os.path.join(data_dir, "nexus_intelligence_feed.csv")
-        processed_data.to_csv(output_path, index=False)
+        processed_data.to_csv(os.path.join(data_dir, "nexus_intelligence_feed.csv"), index=False)
         print(f"Success: Processed {len(processed_data)} community nodes.")
     except Exception as e:
         print(f"Pipeline Critical Failure: {e}")
