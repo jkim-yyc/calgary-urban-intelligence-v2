@@ -4,31 +4,27 @@ import requests
 from datetime import datetime
 
 def fetch_strategic_data():
-    """Fetches Calgary Business License data using the most resilient method."""
-    # This is the 2026 'Master' dataset for all Business Licenses in Calgary
-    url = "https://data.calgary.ca/resource/d5es-794y.json?$limit=100000"
+    """Fetches Calgary Business License data using the current 2026 SODA endpoint."""
+    # Current active endpoint for Calgary Business Licenses
+    url = "https://data.calgary.ca/resource/be89-6uiz.json?$limit=100000"
     
-    # Secondary fallback for the legacy view
-    fallback_url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
-    
-    headers = {'User-Agent': 'CalgaryStrategicIntelligence/1.0'}
+    headers = {'User-Agent': 'NexusStrategicIntelligence/1.1'}
 
     print("System: Accessing Calgary Strategic Data Portal...")
-    
     try:
-        # Attempt primary fetch
         response = requests.get(url, headers=headers, timeout=30)
         
-        # If the primary is a 404, try the fallback
+        # If the primary fails, attempt to fetch from the general 'Business' category
         if response.status_code == 404:
-            print("System: Primary node rotated. Accessing fallback...")
-            response = requests.get(fallback_url, headers=headers, timeout=30)
+            print("System: Resource ID rotated. Attempting discovery via master portal...")
+            url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
+            response = requests.get(url, headers=headers, timeout=30)
             
         response.raise_for_status()
         data = response.json()
         
         if not data:
-            raise ValueError("API returned an empty dataset.")
+            raise ValueError("Empty response from portal.")
             
         return pd.DataFrame(data)
     
@@ -41,22 +37,22 @@ def categorize_sector(license_text):
     text = str(license_text).upper()
     mappings = {
         'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'PETROLEUM', 'SOLAR', 'WIND'],
-        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL', 'BREWERY'],
-        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC', 'ROOFING'],
+        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL'],
+        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC'],
         'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES'],
         'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE'],
         'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT'],
-        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER', 'CYBER'],
+        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER'],
         'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL'],
         'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY'],
-        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC', 'COURIER'],
-        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE', 'FABRICATION'],
+        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC'],
+        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE'],
         'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL'],
         'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR'],
-        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY', 'NON-PROFIT'],
-        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS', 'SPORTS'],
+        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY'],
+        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS'],
         'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE'],
-        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE', 'RECYCLE'],
+        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE'],
         'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM'],
         'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE'],
         'Cannabis & Tobacco': ['CANNABIS', 'TOBACCO', 'VAPE']
@@ -67,16 +63,18 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def process_nexus_feed(df):
-    """Generates weighted KPIs and Health Scores for Community mapping."""
+    """Generates weighted KPIs and Health Scores for Community-level mapping."""
     df.columns = [c.lower() for c in df.columns]
     
-    # Map column names based on API variations
-    comm_col = next((c for c in ['communityname', 'community', 'comm_name'] if c in df.columns), None)
+    # Dynamic column mapping to handle API variations
+    comm_col = next((c for c in ['communityname', 'community', 'comm_name', 'community_name'] if c in df.columns), None)
     type_col = next((c for c in ['licencetypes', 'licence_type', 'licencetype'] if c in df.columns), None)
     date_col = next((c for c in ['issueddate', 'issued_date', 'date_issued'] if c in df.columns), None)
 
     if not comm_col or not type_col:
-        raise KeyError(f"Missing vital columns. Found: {df.columns.tolist()}")
+        # If columns are completely missing, use placeholder data to prevent crash
+        print("Warning: API schema changed. Using defensive column mapping.")
+        return pd.DataFrame()
 
     df = df.dropna(subset=[type_col])
     df['community_key'] = df[comm_col].fillna('CITYWIDE')
@@ -128,8 +126,13 @@ if __name__ == "__main__":
     try:
         raw_df = fetch_strategic_data()
         final_df = process_nexus_feed(raw_df)
+        
+        if final_df.empty:
+            print("System: Pipeline produced empty results. Check API schema.")
+            exit(1)
+            
         final_df.to_csv(os.path.join(output_dir, "nexus_intelligence_feed.csv"), index=False)
-        print(f"Success: Nexus Feed generated with {len(final_df)} communities.")
+        print(f"Success: Intelligence Feed generated with {len(final_df)} communities.")
     except Exception as e:
         print(f"Pipeline Critical Error: {e}")
         exit(1)
