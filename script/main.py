@@ -1,107 +1,97 @@
 import pandas as pd
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
-def fetch_strategic_data():
-    """Fetches Calgary Business License data using the current 2026 SODA endpoint."""
-    # Current active endpoint for Calgary Business Licenses
-    url = "https://data.calgary.ca/resource/be89-6uiz.json?$limit=100000"
-    
-    headers = {'User-Agent': 'NexusStrategicIntelligence/1.1'}
+# --- CONFIGURATION & DQ GATES ---
+SECTOR_MAPPING = {
+    'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'PETROLEUM'],
+    'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL'],
+    'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC'],
+    'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES'],
+    'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE'],
+    'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT'],
+    'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER'],
+    'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL'],
+    'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY'],
+    'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC'],
+    'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE'],
+    'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL'],
+    'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR'],
+    'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY'],
+    'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS'],
+    'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE'],
+    'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE'],
+    'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM'],
+    'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE'],
+    'Cannabis & Tobacco': ['CANNABIS', 'TOBACCO', 'VAPE']
+}
 
-    print("System: Accessing Calgary Strategic Data Portal...")
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        
-        # If the primary fails, attempt to fetch from the general 'Business' category
-        if response.status_code == 404:
-            print("System: Resource ID rotated. Attempting discovery via master portal...")
-            url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
-            response = requests.get(url, headers=headers, timeout=30)
-            
-        response.raise_for_status()
-        data = response.json()
-        
-        if not data:
-            raise ValueError("Empty response from portal.")
-            
-        return pd.DataFrame(data)
+MIN_EXPECTED_RECORDS = 500  # DQ Gate: Minimal data volume before failure
+
+def fetch_incremental_data():
+    """Fetches data using a rolling window to reduce API load and improve scalability."""
+    # Using the system-link for Business Licenses (alias is more stable than 4x4 ID)
+    # We filter on the server side using SoQL $where to only pull the last 3 years of data
+    three_years_ago = (datetime.now() - timedelta(days=1095)).strftime('%Y-%m-%dT%H:%M:%S')
     
-    except Exception as e:
-        print(f"System: Strategic Data Access Denied. Error: {e}")
-        raise
+    url = f"https://data.calgary.ca/resource/fmxu-7969.json?$where=issueddate > '{three_years_ago}'&$limit=100000"
+    
+    print(f"System: Fetching incremental data since {three_years_ago}...")
+    response = requests.get(url, headers={'User-Agent': 'NexusStrategicIntelligence/2.0'})
+    response.raise_for_status()
+    
+    df = pd.DataFrame(response.json())
+    
+    # --- DATA QUALITY GATE 1: VOLUME ---
+    if len(df) < MIN_EXPECTED_RECORDS:
+        raise ValueError(f"DQ Failure: API returned only {len(df)} records. Aborting to protect dashboard.")
+        
+    return df
 
 def categorize_sector(license_text):
-    """STRICT LOGIC: Aggregates 'licencetypes' into ~20 strategic sectors."""
+    """Aggregates string values based on the global SECTOR_MAPPING dictionary."""
     text = str(license_text).upper()
-    mappings = {
-        'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'PETROLEUM', 'SOLAR', 'WIND'],
-        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL'],
-        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC'],
-        'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES'],
-        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE'],
-        'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT'],
-        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER'],
-        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL'],
-        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY'],
-        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC'],
-        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE'],
-        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL'],
-        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR'],
-        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY'],
-        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS'],
-        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE'],
-        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE'],
-        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM'],
-        'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE'],
-        'Cannabis & Tobacco': ['CANNABIS', 'TOBACCO', 'VAPE']
-    }
-    for sector, keywords in mappings.items():
+    for sector, keywords in SECTOR_MAPPING.items():
         if any(kw in text for kw in keywords):
             return sector
     return 'GENERAL_COMMERCIAL'
 
-def process_nexus_feed(df):
-    """Generates weighted KPIs and Health Scores for Community-level mapping."""
+def calculate_intelligence_metrics(df):
+    """Performs vector-based KPI calculations with weighted accuracy logic."""
     df.columns = [c.lower() for c in df.columns]
     
-    # Dynamic column mapping to handle API variations
-    comm_col = next((c for c in ['communityname', 'community', 'comm_name', 'community_name'] if c in df.columns), None)
-    type_col = next((c for c in ['licencetypes', 'licence_type', 'licencetype'] if c in df.columns), None)
-    date_col = next((c for c in ['issueddate', 'issued_date', 'date_issued'] if c in df.columns), None)
+    # Identify dynamic columns
+    comm_col = next((c for c in ['communityname', 'community', 'comm_name'] if c in df.columns), 'community_name')
+    type_col = next((c for c in ['licencetypes', 'licence_type'] if c in df.columns), 'licence_type')
+    date_col = next((c for c in ['issueddate', 'issued_date'] if c in df.columns), 'issued_date')
 
-    if not comm_col or not type_col:
-        # If columns are completely missing, use placeholder data to prevent crash
-        print("Warning: API schema changed. Using defensive column mapping.")
-        return pd.DataFrame()
-
+    # Data Cleanup
     df = df.dropna(subset=[type_col])
-    df['community_key'] = df[comm_col].fillna('CITYWIDE')
     df['sector'] = df[type_col].apply(categorize_sector)
     df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
     
-    # Momentum: Since Jan 1, 2025
-    momentum_cutoff = datetime(2025, 1, 1)
+    # Momentum Threshold: Activity in the last 12 months
+    one_year_ago = datetime.now() - timedelta(days=365)
     
     # Aggregation
-    agg = df.groupby('community_key').agg(
-        footprint=(type_col, 'count'),
+    agg = df.groupby(comm_col).agg(
+        footprint=('sector', 'count'),
         resilience=('sector', 'nunique'),
-        momentum=('issued_dt', lambda x: (x > momentum_cutoff).sum())
+        momentum=('issued_dt', lambda x: (x > one_year_ago).sum())
     ).reset_index()
 
-    # Normalization
+    # Normalization (0 to 1 scaling)
     for col in ['footprint', 'resilience', 'momentum']:
         max_val = agg[col].max()
         agg[f'n_{col}'] = agg[col] / (max_val if max_val > 0 else 1)
 
-    # Innovation Acceleration
+    # Innovation Acceleration (Momentum x Resilience)
     agg['n_acceleration'] = (agg['n_momentum'] * agg['n_resilience'])
     acc_max = agg['n_acceleration'].max()
     agg['n_acceleration'] /= (acc_max if acc_max > 0 else 1)
 
-    # Weighted Health Score: 35/35/15/15
+    # Weighted Health Score: Prioritizing High-Accuracy historical metrics (Footprint/Resilience)
     agg['health_score'] = (
         (agg['n_footprint'] * 0.35) + 
         (agg['n_resilience'] * 0.35) + 
@@ -109,6 +99,11 @@ def process_nexus_feed(df):
         (agg['n_acceleration'] * 0.15)
     )
 
+    # --- DATA QUALITY GATE 2: HEALTH SCORE INTEGRITY ---
+    if agg['health_score'].isnull().all():
+        raise ValueError("DQ Failure: Intelligence Engine produced null Health Scores.")
+
+    # Strategic Directives
     agg['strategic_action'] = pd.cut(
         agg['health_score'], 
         bins=[0, 0.25, 0.50, 0.75, 1.05], 
@@ -116,23 +111,18 @@ def process_nexus_feed(df):
         include_lowest=True
     )
     
-    return agg.rename(columns={'community_key': 'community_name'})
+    return agg.rename(columns={comm_col: 'community_name'})
 
 if __name__ == "__main__":
     base_path = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(base_path, "..", "data")
-    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(base_path, "..", "data", "nexus_intelligence_feed.csv")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     try:
-        raw_df = fetch_strategic_data()
-        final_df = process_nexus_feed(raw_df)
-        
-        if final_df.empty:
-            print("System: Pipeline produced empty results. Check API schema.")
-            exit(1)
-            
-        final_df.to_csv(os.path.join(output_dir, "nexus_intelligence_feed.csv"), index=False)
-        print(f"Success: Intelligence Feed generated with {len(final_df)} communities.")
+        raw_df = fetch_incremental_data()
+        processed_df = calculate_intelligence_metrics(raw_df)
+        processed_df.to_csv(output_path, index=False)
+        print(f"Pipeline Success: Nexus Feed contains {len(processed_df)} community nodes.")
     except Exception as e:
-        print(f"Pipeline Critical Error: {e}")
+        print(f"Critical System Failure: {e}")
         exit(1)
