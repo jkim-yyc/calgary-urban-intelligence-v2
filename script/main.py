@@ -4,28 +4,36 @@ import requests
 from datetime import datetime
 
 def fetch_strategic_data():
-    """Fetches Calgary Business License data using the current stable 2026 endpoint."""
-    # Current master dataset for Calgary Business Licenses
-    url = "https://data.calgary.ca/resource/tp68-p4gg.json?$limit=100000"
+    """Fetches Calgary Business License data using the most resilient method."""
+    # This is the 2026 'Master' dataset for all Business Licenses in Calgary
+    url = "https://data.calgary.ca/resource/d5es-794y.json?$limit=100000"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) NexusStrategicIntelligence/1.0'
-    }
+    # Secondary fallback for the legacy view
+    fallback_url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
+    
+    headers = {'User-Agent': 'CalgaryStrategicIntelligence/1.0'}
 
     print("System: Accessing Calgary Strategic Data Portal...")
+    
     try:
+        # Attempt primary fetch
         response = requests.get(url, headers=headers, timeout=30)
         
-        # Fallback to the 'Open Data' discovery endpoint if the resource ID has rotated
+        # If the primary is a 404, try the fallback
         if response.status_code == 404:
-            print("System: Primary endpoint moved. Searching Discovery API...")
-            url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
-            response = requests.get(url, headers=headers, timeout=30)
+            print("System: Primary node rotated. Accessing fallback...")
+            response = requests.get(fallback_url, headers=headers, timeout=30)
             
         response.raise_for_status()
-        return pd.DataFrame(response.json())
+        data = response.json()
+        
+        if not data:
+            raise ValueError("API returned an empty dataset.")
+            
+        return pd.DataFrame(data)
+    
     except Exception as e:
-        print(f"System: Strategic Data Access Denied. Reason: {e}")
+        print(f"System: Strategic Data Access Denied. Error: {e}")
         raise
 
 def categorize_sector(license_text):
@@ -36,20 +44,20 @@ def categorize_sector(license_text):
         'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL', 'BREWERY'],
         'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC', 'ROOFING'],
         'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES'],
-        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE', 'BROKER'],
+        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE'],
         'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT'],
         'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER', 'CYBER'],
-        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL', 'PHARMACY'],
-        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY', 'AESTHETIC'],
-        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC', 'FREIGHT'],
+        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL'],
+        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY'],
+        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC', 'COURIER'],
         'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE', 'FABRICATION'],
-        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL', 'LANDLORD'],
-        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR', 'COLLEGE'],
+        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL'],
+        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR'],
         'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY', 'NON-PROFIT'],
         'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS', 'SPORTS'],
-        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE', 'MECHANIC'],
+        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE'],
         'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE', 'RECYCLE'],
-        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM', 'ADVERT'],
+        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM'],
         'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE'],
         'Cannabis & Tobacco': ['CANNABIS', 'TOBACCO', 'VAPE']
     }
@@ -59,25 +67,28 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def process_nexus_feed(df):
-    """Generates weighted KPIs and Health Scores for Community-level mapping."""
+    """Generates weighted KPIs and Health Scores for Community mapping."""
     df.columns = [c.lower() for c in df.columns]
     
-    # Check for alternate naming conventions in the Calgary API
-    comm_col = 'communityname' if 'communityname' in df.columns else 'community'
-    type_col = 'licencetypes' if 'licencetypes' in df.columns else 'licence_type'
-    date_col = 'issueddate' if 'issueddate' in df.columns else 'issued_date'
+    # Map column names based on API variations
+    comm_col = next((c for c in ['communityname', 'community', 'comm_name'] if c in df.columns), None)
+    type_col = next((c for c in ['licencetypes', 'licence_type', 'licencetype'] if c in df.columns), None)
+    date_col = next((c for c in ['issueddate', 'issued_date', 'date_issued'] if c in df.columns), None)
+
+    if not comm_col or not type_col:
+        raise KeyError(f"Missing vital columns. Found: {df.columns.tolist()}")
 
     df = df.dropna(subset=[type_col])
     df['community_key'] = df[comm_col].fillna('CITYWIDE')
     df['sector'] = df[type_col].apply(categorize_sector)
     df['issued_dt'] = pd.to_datetime(df[date_col], errors='coerce')
     
-    # Momentum: Activity since Jan 1, 2025
+    # Momentum: Since Jan 1, 2025
     momentum_cutoff = datetime(2025, 1, 1)
     
     # Aggregation
     agg = df.groupby('community_key').agg(
-        footprint=('sector', 'count'),
+        footprint=(type_col, 'count'),
         resilience=('sector', 'nunique'),
         momentum=('issued_dt', lambda x: (x > momentum_cutoff).sum())
     ).reset_index()
@@ -118,7 +129,7 @@ if __name__ == "__main__":
         raw_df = fetch_strategic_data()
         final_df = process_nexus_feed(raw_df)
         final_df.to_csv(os.path.join(output_dir, "nexus_intelligence_feed.csv"), index=False)
-        print("Success: Nexus Intelligence Feed generated.")
+        print(f"Success: Nexus Feed generated with {len(final_df)} communities.")
     except Exception as e:
-        print(f"Pipeline Error: {e}")
+        print(f"Pipeline Critical Error: {e}")
         exit(1)
