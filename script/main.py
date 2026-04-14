@@ -3,10 +3,11 @@ import numpy as np
 import requests
 import os
 
-# 2026 Verified Active Endpoint
+# Verified 2026 Calgary Business License Endpoint
 DATASET_ID = "vdjc-pybd"
 BASE_URL = f"https://data.calgary.ca/resource/{DATASET_ID}.json"
 
+# Strategic Mapping: Aggregating 100+ raw types into ~30 strategic sectors
 INDUSTRY_MAP = {
     'RESTAURANT': 'Food & Beverage', 'FOOD': 'Food & Beverage', 'LIQUOR': 'Food & Beverage',
     'RETAIL': 'Retail Commerce', 'DEALER': 'Retail Commerce', 'STORE': 'Retail Commerce',
@@ -33,7 +34,6 @@ def categorize(val):
     return 'Specialized/Other'
 
 def generate_nexus_feed():
-    # Using 2026 Field Names: comdistnm & licencetypes
     params = {
         "$limit": 100000,
         "$select": "comdistnm, licencetypes, count(licencetypes)",
@@ -50,11 +50,11 @@ def generate_nexus_feed():
         df.columns = ['community_name', 'raw_license', 'footprint_count']
         df['footprint_count'] = pd.to_numeric(df['footprint_count'])
 
-        # Transform
+        # Categorization Logic
         df['industry_sector'] = df['raw_license'].apply(categorize)
         df = df.groupby(['community_name', 'industry_sector'], as_index=False)['footprint_count'].sum()
 
-        # Hygiene & KPIs
+        # Hygiene & Metrics
         df['community_name'] = df['community_name'].str.title().str.strip()
         df['resilience'] = df.groupby('community_name')['industry_sector'].transform('count')
         
@@ -67,15 +67,16 @@ def generate_nexus_feed():
             mn, mx = df[m].min(), df[m].max()
             df[f'n_{m}'] = (df[m] - mn) / (mx - mn) if mx != mn else 1.0
 
+        # Vitality Index Calculation
         df['health_score'] = (df['n_resilience'] * 0.35 + df['n_footprint_count'] * 0.35 + 
                               df['n_momentum'] * 0.15 + df['n_acceleration'] * 0.15)
 
         os.makedirs('data', exist_ok=True)
         df.to_csv('data/nexus_intelligence_feed.csv', index=False)
-        print("Pipeline Clear: Data Streamed to CSV.")
+        print("Success: Data Feed Updated.")
 
     except Exception as e:
-        print(f"System Error: {e}")
+        print(f"Operational Error: {e}")
         exit(1)
 
 if __name__ == "__main__":
