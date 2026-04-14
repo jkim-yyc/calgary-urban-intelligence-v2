@@ -35,15 +35,17 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 1. Stage the changes
+          # 1. Fetch the latest changes from the server
+          git fetch origin main
+          
+          # 2. Force the local index to match the server's code, 
+          # but keep our NEWly generated data/nexus_intelligence_feed.csv
+          git reset --mixed origin main
+          
+          # 3. Add the newly generated data
           mkdir -p data
           git add data/nexus_intelligence_feed.csv
           
-          # 2. Commit locally first (This clears the "uncommitted changes" error)
-          git commit -m "Strategic Refresh [skip ci]" || echo "No changes to commit"
-          
-          # 3. Pull remote changes and put our commit on top
-          git pull --rebase origin main
-          
-          # 4. Push the combined history
-          git push origin main
+          # 4. Commit and Push (using --force to clear the conflict)
+          git commit -m "Strategic Refresh [skip ci]" || echo "Clean State"
+          git push origin main --force
