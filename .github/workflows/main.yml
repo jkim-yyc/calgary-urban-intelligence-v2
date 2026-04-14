@@ -3,6 +3,8 @@ name: Nexus Intelligence Pipeline
 on:
   push:
     branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -21,16 +23,15 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas numpy
+        pip install pandas numpy requests
 
-    - name: Execute Strategic Intelligence Pipeline
+    - name: Execute Weighted Strategic Pipeline
       run: python script/main.py
 
     - name: Commit Intelligence Feed
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        # The script creates the 'data' folder, so we add it here
         git add data/nexus_intelligence_feed.csv
-        git commit -m "Neural Feed Update: $(date +'%Y-%m-%d')" || echo "No changes to commit"
+        git commit -m "Automated Weighted Neural Feed Update" || echo "No changes to commit"
         git push
