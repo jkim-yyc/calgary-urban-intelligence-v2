@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Essential for rebasing
 
       - name: Setup Environment
         uses: actions/setup-python@v5
@@ -28,10 +30,17 @@ jobs:
       - name: Run Intelligence Engine
         run: python script/main.py
 
-      - name: Deploy Data
+      - name: Sync and Deploy Data
         run: |
           git config user.name "Nexus Bot"
           git config user.email "actions@github.com"
           git add data/nexus_intelligence_feed.csv
-          git commit -m "Automated Refresh: $(date +'%Y-%m-%d')" || exit 0
-          git push
+          
+          # Only commit if changes exist
+          git diff --quiet && git diff --staged --quiet || git commit -m "Automated Refresh: $(date +'%Y-%m-%d')"
+          
+          # Rebase ensures our new data sits on top of any remote changes
+          git pull --rebase origin main
+          
+          # Final push
+          git push origin main
