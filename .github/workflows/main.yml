@@ -2,7 +2,7 @@ name: Nexus Production Sync
 
 on:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * 1' # Weekly Monday Refresh
   push:
     branches: [ main ]
   workflow_dispatch:
@@ -19,12 +19,12 @@ jobs:
         with:
           fetch-depth: 0 
 
-      - name: Setup Python
+      - name: Setup Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install Core Dependencies
+      - name: Install ETL Dependencies
         run: pip install pandas numpy requests
 
       - name: Execute Intelligence Pipeline
@@ -35,17 +35,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 1. Fetch the latest changes from the server
+          # Force synchronization with remote to avoid push rejections
           git fetch origin main
-          
-          # 2. Force the local index to match the server's code, 
-          # but keep our NEWly generated data/nexus_intelligence_feed.csv
           git reset --mixed origin main
           
-          # 3. Add the newly generated data
           mkdir -p data
           git add data/nexus_intelligence_feed.csv
           
-          # 4. Commit and Push (using --force to clear the conflict)
-          git commit -m "Strategic Refresh [skip ci]" || echo "Clean State"
+          # Commit only if changes exist, push with force to overwrite data conflicts
+          git commit -m "Strategic Refresh: Level 2 Intelligence [skip ci]" || echo "Clean State"
           git push origin main --force
