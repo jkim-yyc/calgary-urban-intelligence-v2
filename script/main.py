@@ -32,7 +32,6 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def calculate_nexus_metrics(df):
-    # Ensure licencetypes exists, handle case sensitivity
     col_name = 'licencetypes' if 'licencetypes' in df.columns else 'LICENCETYPES'
     df['industry_sector'] = df[col_name].apply(categorize_sector)
 
@@ -61,17 +60,22 @@ def calculate_nexus_metrics(df):
     return df
 
 if __name__ == "__main__":
-    # Robust absolute pathing
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.abspath(os.path.join(script_dir, '..', 'calgary_business_data.csv'))
-    output_path = os.path.abspath(os.path.join(script_dir, '..', 'nexus_intelligence_feed.csv'))
+    root_dir = os.path.abspath(os.path.join(script_dir, '..'))
+    
+    # Pathing to the 'data' folder
+    data_dir = os.path.join(root_dir, 'data')
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    input_path = os.path.join(root_dir, 'calgary_business_data.csv')
+    output_path = os.path.join(data_dir, 'nexus_intelligence_feed.csv')
 
     if os.path.exists(input_path):
         raw_df = pd.read_csv(input_path)
         processed_df = calculate_nexus_metrics(raw_df)
         processed_df.to_csv(output_path, index=False)
-        print(f"Process Complete. Output saved to: {output_path}")
+        print(f"Process Complete. Intelligence Feed saved to: {output_path}")
     else:
-        print(f"CRITICAL ERROR: File not found at {input_path}")
-        # This will trigger the Exit Code 1 you saw
+        print(f"CRITICAL ERROR: Input file not found at {input_path}")
         exit(1)
