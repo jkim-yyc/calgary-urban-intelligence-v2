@@ -7,7 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-# NEW: Explicitly grant the bot write access to the repository
 permissions:
   contents: write
 
@@ -17,6 +16,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Essential for rebasing/pulling history
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -35,5 +36,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           mkdir -p data
           git add data/nexus_intelligence_feed.csv
+          # The Rebase Pull ensures the bot is synced with your manual pushes
+          git pull --rebase origin main
           git commit -m "Strategic Refresh [skip ci]" || echo "Clean State"
-          git push
+          git push origin main
