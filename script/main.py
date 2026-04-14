@@ -3,27 +3,19 @@ import os
 import requests
 
 def fetch_strategic_data():
-    """
-    Uses SoQL to aggregate data on the server side. 
-    Reduces data transfer by 99% and boosts performance.
-    """
-    # Current Calgary Business License Endpoint
-    url = "https://data.calgary.ca/resource/fmxu-7969.json"
+    """Fetches business license data using the most stable known endpoint."""
+    # Current active endpoint for Calgary Business Licenses
+    url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=100000"
     
-    # SoQL Query: Group by community, count licenses, and count unique types
-    # This replaces the need for local 'atomic' processing for basic KPIs
-    query = (
-        "?$select=communityname,count(licencetypes) as total_count,"
-        "count(distinct industry_sector_from_license) as unique_sectors,"
-        "sum(case(issueddate > '2024-01-01', 1, else 0)) as recent_growth"
-        "&$group=communityname"
-    )
+    print("System: Accessing Calgary Strategic Data Portal...")
+    response = requests.get(url)
     
-    # Fallback to standard grouping if complex SoQL fields aren't supported
-    simple_query = "?$select=communityname,licencetypes,issueddate&$limit=100000"
-    
-    print("System: Fetching optimized strategic aggregates...")
-    response = requests.get(url + simple_query)
+    # If 404, try the secondary stable endpoint
+    if response.status_code == 404:
+        print("System: Primary endpoint moved. Redirecting to secondary...")
+        url = "https://data.calgary.ca/resource/g5zp-yj93.json?$limit=100000"
+        response = requests.get(url)
+        
     response.raise_for_status()
     return pd.DataFrame(response.json())
 
@@ -58,12 +50,14 @@ def categorize_sector(license_text):
     return 'GENERAL_COMMERCIAL'
 
 def process_nexus_feed(df):
-    """Optimized vector operations for KPI generation."""
-    # Ensure correct columns
+    """Generates weighted KPIs and Health Scores."""
+    # Standardize column names
     df.columns = [c.lower() for c in df.columns]
-    df = df.dropna(subset=['communityname', 'licencetypes'])
     
-    # Apply industry mapping
+    # Ensure necessary columns exist
+    required = ['communityname', 'licencetypes', 'issueddate']
+    df = df.dropna(subset=[col for col in required if col in df.columns])
+    
     df['sector'] = df['licencetypes'].apply(categorize_sector)
     df['issueddate'] = pd.to_datetime(df['issueddate'], errors='coerce')
     
@@ -71,19 +65,20 @@ def process_nexus_feed(df):
     agg = df.groupby('communityname').agg(
         footprint=('licencetypes', 'count'),
         resilience=('sector', 'nunique'),
-        momentum=('issueddate', lambda x: (x > '2024-01-01').sum())
+        momentum=('issueddate', lambda x: (x > '2025-01-01').sum())
     ).reset_index()
 
-    # Normalization (Max-Scaling)
+    # Normalization
     for col in ['footprint', 'resilience', 'momentum']:
         max_val = agg[col].max()
         agg[f'n_{col}'] = agg[col] / (max_val if max_val > 0 else 1)
 
-    # Derived KPI: Innovation Acceleration
+    # Innovation Acceleration
     agg['n_acceleration'] = (agg['n_momentum'] * agg['n_resilience'])
-    agg['n_acceleration'] /= agg['n_acceleration'].max()
+    acc_max = agg['n_acceleration'].max()
+    agg['n_acceleration'] /= (acc_max if acc_max > 0 else 1)
 
-    # Weighted Health Score (Accuracy-Based Weighting)
+    # Weighted Health Score (35/35/15/15)
     agg['health_score'] = (
         (agg['n_footprint'] * 0.35) + 
         (agg['n_resilience'] * 0.35) + 
@@ -91,17 +86,16 @@ def process_nexus_feed(df):
         (agg['n_acceleration'] * 0.15)
     )
 
-    # Strategic Directives
     agg['strategic_action'] = pd.cut(
         agg['health_score'], 
-        bins=[0, 0.25, 0.50, 0.75, 1.0], 
-        labels=["URGENT INTERVENTION", "MONITOR FRICTION", "STABLE OPERATIONS", "NEURAL CORE"]
+        bins=[0, 0.25, 0.50, 0.75, 1.05], 
+        labels=["URGENT INTERVENTION", "MONITOR FRICTION", "STABLE OPERATIONS", "NEURAL CORE"],
+        include_lowest=True
     )
     
     return agg
 
 if __name__ == "__main__":
-    # Path Security: Use absolute paths relative to script location
     base_path = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(base_path, "..", "data")
     os.makedirs(output_dir, exist_ok=True)
