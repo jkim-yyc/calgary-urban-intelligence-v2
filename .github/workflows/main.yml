@@ -17,7 +17,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # Essential for rebasing/pulling history
+          fetch-depth: 0 
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -34,9 +34,16 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 1. Stage the changes
           mkdir -p data
           git add data/nexus_intelligence_feed.csv
-          # The Rebase Pull ensures the bot is synced with your manual pushes
+          
+          # 2. Commit locally first (This clears the "uncommitted changes" error)
+          git commit -m "Strategic Refresh [skip ci]" || echo "No changes to commit"
+          
+          # 3. Pull remote changes and put our commit on top
           git pull --rebase origin main
-          git commit -m "Strategic Refresh [skip ci]" || echo "Clean State"
+          
+          # 4. Push the combined history
           git push origin main
