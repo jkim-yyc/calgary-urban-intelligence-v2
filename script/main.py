@@ -1,29 +1,47 @@
 import pandas as pd
 import numpy as np
 import os
+import requests
+from datetime import datetime, timedelta
+
+def fetch_all_calgary_data():
+    """Extracts the full atomic dataset from Calgary Open Data Portal."""
+    url = "https://data.calgary.ca/resource/6963-8pqa.json?$limit=500000"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        df = pd.DataFrame(response.json())
+        return df
+    except Exception as e:
+        print(f"Extraction Failed: {e}")
+        exit(1)
 
 def categorize_sector(license_text):
+    """
+    STRICT LOGIC: Scans 'licencetypes' and maps to ~20 strategic industry sectors.
+    Designed for high-efficiency string aggregation.
+    """
     text = str(license_text).upper()
     mappings = {
-        'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'EXTRACT', 'PETROLEUM'],
-        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'ALCOHOL', 'BEVERAGE', 'HOTEL', 'CATER', 'PUB'],
-        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'DEVELOP', 'PLUMB', 'ELECTRIC'],
-        'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES', 'MERCHANDISE'],
-        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE'],
-        'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT'],
-        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER', 'CYBER'],
-        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL', 'WELLNESS'],
-        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY', 'AESTHETIC'],
-        'Logistics & Transport': ['WAREHOUSE', 'DISTRIBUTION', 'TRUCK', 'TRANSPORT', 'FREIGHT', 'LOGISTIC'],
-        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE', 'FABRICATION'],
-        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL', 'LANDLORD'],
-        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR'],
-        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY', 'NON-PROFIT'],
-        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS', 'SPORTS'],
-        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE'],
-        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE', 'RECYCLE'],
-        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM', 'ADVERT'],
-        'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE'],
+        'Energy & Resources': ['OIL', 'GAS', 'ENERGY', 'MINING', 'PETROLEUM', 'EXTRACT', 'RENEWABLE'],
+        'Hospitality & Tourism': ['RESTAURANT', 'FOOD', 'HOTEL', 'PUB', 'CATER', 'ALCOHOL', 'BEVERAGE', 'BREWERY'],
+        'Construction & Infra': ['CONSTRUCT', 'BUILD', 'CONTRACTOR', 'PLUMB', 'ELECTRIC', 'ROOFING', 'EXCAVATE'],
+        'Retail Trade': ['RETAIL', 'DEALER', 'STORE', 'SHOP', 'SALES', 'MERCHANDISE', 'MALL'],
+        'Finance & Insurance': ['FINANCE', 'BANK', 'INSURANCE', 'INVEST', 'MORTGAGE', 'BROKER'],
+        'Professional Services': ['CONSULT', 'LEGAL', 'ACCOUNT', 'ENGINEER', 'ARCHITECT', 'ADVISOR'],
+        'Tech & Innovation': ['SOFTWARE', 'TECH', 'DATA', 'SYSTEM', 'COMPUTER', 'CYBER', 'DIGITAL'],
+        'Healthcare & Wellness': ['HEALTH', 'MEDICAL', 'DENTAL', 'CLINIC', 'HOSPITAL', 'PHARMACY', 'OPTICAL'],
+        'Personal Services': ['MASSAGE', 'SALON', 'BARBER', 'CLEAN', 'LAUNDRY', 'AESTHETIC', 'TATTOO'],
+        'Logistics & Transport': ['WAREHOUSE', 'TRUCK', 'TRANSPORT', 'LOGISTIC', 'FREIGHT', 'COURIER'],
+        'Industrial & Mfg': ['MANUFACTUR', 'FACTORY', 'INDUSTRIAL', 'MACHINE', 'FABRICATION', 'WELDING'],
+        'Real Estate': ['REAL ESTATE', 'PROPERTY', 'LEASING', 'RENTAL', 'LANDLORD', 'REALTOR'],
+        'Education': ['SCHOOL', 'TRAIN', 'EDUCATE', 'ACADEMY', 'TUTOR', 'COLLEGE', 'UNIVERSITY'],
+        'Public & Social': ['GOVERNMENT', 'PUBLIC', 'SOCIAL', 'COMMUNITY', 'NON-PROFIT', 'CHARITY'],
+        'Arts & Recreation': ['ART', 'MUSEUM', 'RECREATION', 'GYM', 'FITNESS', 'SPORTS', 'THEATRE'],
+        'Automotive': ['AUTO', 'VEHICLE', 'REPAIR', 'CAR WASH', 'TIRE', 'MECHANIC'],
+        'Agri & Environment': ['AGRI', 'FARM', 'GARDEN', 'ENVIRONMENT', 'WASTE', 'RECYCLE', 'LANDSCAPE'],
+        'Media & Comm': ['MEDIA', 'PUBLISH', 'COMMUNICATION', 'TELECOM', 'ADVERT', 'BROADCAST'],
+        'Security & Safety': ['SECURITY', 'SAFETY', 'ALARM', 'INVESTIGATE', 'PROTECT'],
         'Cannabis & Tobacco': ['CANNABIS', 'TOBACCO', 'VAPE', 'RETAIL CANNABIS']
     }
     for sector, keywords in mappings.items():
@@ -31,65 +49,66 @@ def categorize_sector(license_text):
             return sector
     return 'GENERAL_COMMERCIAL'
 
-def calculate_nexus_metrics(df):
-    df.columns = [c.lower() for c in df.columns]
+def process_community_intelligence(df):
+    """Processes atomic data into a Weighted 4-KPI Community Model."""
     
-    # 1. KPI Normalization
+    # Clean and Format
+    df = df.dropna(subset=['communityname', 'licencetypes', 'issueddate'])
     df['industry_sector'] = df['licencetypes'].apply(categorize_sector)
-    df['strategic_footprint'] = df['impact_weight'] / df['impact_weight'].max()
-    df['systemic_resilience'] = df['vitality_index'] / df['vitality_index'].max()
-    df['expansion_momentum'] = df['growth_count'] / df['growth_count'].max()
+    df['issueddate'] = pd.to_datetime(df['issueddate'])
+    
+    # Define Recent Growth (Last 2 Years)
+    two_years_ago = datetime.now() - timedelta(days=730)
+    df['is_recent'] = df['issueddate'] > two_years_ago
 
-    # 2. Innovation Acceleration
-    city_avg_growth = df['growth_count'].mean()
-    df['innovation_acceleration'] = (df['growth_count'] / (city_avg_growth if city_avg_growth != 0 else 1)) * df['systemic_resilience']
-    df['innovation_acceleration'] = df['innovation_acceleration'].clip(upper=2.0)
+    # 1. Atomic to Community Aggregation
+    community_agg = df.groupby('communityname').agg(
+        total_count=('licencetypes', 'count'),
+        unique_sectors=('industry_sector', 'nunique'),
+        recent_growth=('is_recent', 'sum')
+    ).reset_index()
 
-    # 3. Integrated Health Score
-    df['health_score'] = (
-        (df['strategic_footprint'] * 0.2) + 
-        (df['systemic_resilience'] * 0.3) + 
-        (df['innovation_acceleration'] * 0.3) + 
-        (df['expansion_momentum'] * 0.2)
+    # 2. KPI Normalization
+    community_agg['strategic_footprint'] = community_agg['total_count'] / community_agg['total_count'].max()
+    community_agg['systemic_resilience'] = community_agg['unique_sectors'] / community_agg['unique_sectors'].max()
+    community_agg['expansion_momentum'] = community_agg['recent_growth'] / community_agg['recent_growth'].max()
+    
+    # Innovation Acceleration logic
+    community_agg['innovation_acceleration'] = (community_agg['expansion_momentum'] * community_agg['systemic_resilience'])
+    community_agg['innovation_acceleration'] = community_agg['innovation_acceleration'] / community_agg['innovation_acceleration'].max()
+
+    # 3. Weighted Health Score Calculation
+    # Weights: Footprint (35%) & Resilience (35%) are high accuracy.
+    # Momentum (15%) & Acceleration (15%) account for temporal volatility.
+    community_agg['health_score'] = (
+        (community_agg['strategic_footprint'] * 0.35) + 
+        (community_agg['systemic_resilience'] * 0.35) + 
+        (community_agg['expansion_momentum'] * 0.15) + 
+        (community_agg['innovation_acceleration'] * 0.15)
     )
 
     # 4. Strategic Action Labels
-    def get_action(score):
+    def get_directive(score):
         if score >= 0.75: return "NEURAL CORE"
         elif 0.50 <= score < 0.75: return "STABLE OPERATIONS"
-        elif 0.30 <= score < 0.50: return "MONITOR FRICTION"
+        elif 0.25 <= score < 0.50: return "MONITOR FRICTION"
         else: return "URGENT INTERVENTION"
 
-    df['strategic_action'] = df['health_score'].apply(get_action)
-    return df
+    community_agg['strategic_action'] = community_agg['health_score'].apply(get_directive)
+    
+    return community_agg
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.abspath(os.path.join(script_dir, '..'))
-    
-    # INPUT: Now in the Root folder
-    input_file = os.path.join(root_dir, 'calgary_strategy_kpis.csv')
-    
-    # OUTPUT: Still in the Data folder (Script will create folder if missing)
     data_dir = os.path.join(root_dir, 'data')
+    
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-    output_file = os.path.join(data_dir, 'nexus_intelligence_feed.csv')
+        
+    output_path = os.path.join(data_dir, 'nexus_intelligence_feed.csv')
 
-    if os.path.exists(input_file):
-        try:
-            raw_df = pd.read_csv(input_file)
-            if raw_df.empty:
-                print("Error: Input file is empty.")
-                exit(1)
-            
-            processed_df = calculate_nexus_metrics(raw_df)
-            processed_df.to_csv(output_file, index=False)
-            print(f"Success. Intelligence Feed generated at: {output_file}")
-            
-        except Exception as e:
-            print(f"Processing Error: {e}")
-            exit(1)
-    else:
-        print(f"Critical Error: {input_file} not found in root.")
-        exit(1)
+    raw_data = fetch_all_calgary_data()
+    processed_feed = process_community_intelligence(raw_data)
+    processed_feed.to_csv(output_path, index=False)
+    print(f"Success: Production Feed generated at {output_path}")
