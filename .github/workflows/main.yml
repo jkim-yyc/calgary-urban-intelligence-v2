@@ -28,10 +28,11 @@ jobs:
     - name: Execute Strategic Intelligence Pipeline
       run: python script/main.py
 
-    - name: Commit Intelligence Feed to Root
+    - name: Commit Intelligence Feed
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add nexus_intelligence_feed.csv
+        # Add the file from the data folder
+        git add data/nexus_intelligence_feed.csv
         git commit -m "Neural Feed Update: $(date +'%Y-%m-%d')" || echo "No changes to commit"
         git push
